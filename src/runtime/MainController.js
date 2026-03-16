@@ -314,12 +314,15 @@ export class MainController {
   }
 
   onPointerMove(event) {
+    const pointer = this.getNormalizedPointer(event);
+    this.sections.igloo?.setPointer(pointer);
     const hit = this.pickProjectHitFromEvent(event);
     this.sections.cubes?.setPointerHit(hit);
     this.setHoveredProject(hit?.project ?? null);
   }
 
   onPointerLeave() {
+    this.sections.igloo?.setPointer(null);
     this.sections.cubes?.setPointerHit(null);
     this.setHoveredProject(null);
   }
@@ -471,7 +474,7 @@ export class MainController {
       ...uiState,
       useWebglUi: this.webglUi?.isReadyForHero?.()
         && uiState.route.name === 'home'
-        && ['igloo', 'cubes'].includes(uiState.activeSectionKey)
+        && ['igloo', 'cubes', 'entry'].includes(uiState.activeSectionKey)
         && !uiState.project
     });
     this.webglUi?.update({

@@ -384,6 +384,27 @@ export class UIScene {
     }
   }
 
+  applyEntryHomePresentation(route = null, activeSectionKey = null, hasProject = false) {
+    const isEntryHome = route?.name === 'home' && activeSectionKey === 'entry' && !hasProject;
+    const panels = [
+      this.manifestoShell,
+      this.projectList,
+      this.root.querySelector('[data-social-panel]'),
+      this.root.querySelector('.hud__pillbar'),
+      this.root.querySelector('.hud__footer')
+    ].filter(Boolean);
+
+    const hiddenOpacity = isEntryHome ? '0' : '';
+    const hiddenPointerEvents = isEntryHome ? 'none' : '';
+    const hiddenTransform = isEntryHome ? 'translate3d(0, 16px, 0)' : '';
+
+    panels.forEach((panel) => {
+      panel.style.opacity = hiddenOpacity;
+      panel.style.pointerEvents = hiddenPointerEvents;
+      panel.style.transform = hiddenTransform;
+    });
+  }
+
   update(state) {
     if (this.state.sectionLabel !== state.sectionLabel) {
       this.sectionLabel.textContent = state.sectionLabel;
@@ -399,6 +420,7 @@ export class UIScene {
     this.applyDetailPresentation(state.detailUiProgress, Boolean(state.project));
     this.applyEntryPresentation(state.entryPresentation, state.route, state.activeSectionKey, Boolean(state.project));
     this.applyCubesHomePresentation(state.route, state.activeSectionKey, Boolean(state.project));
+    this.applyEntryHomePresentation(state.route, state.activeSectionKey, Boolean(state.project));
 
     const nextRouteName = state.route.name;
     const nextProjectHash = state.project?.hash ?? null;

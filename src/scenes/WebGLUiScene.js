@@ -664,8 +664,11 @@ export class WebGLUiScene {
     const isCubesHome = this.state.routeName === 'home'
       && this.state.activeSectionKey === 'cubes'
       && !this.state.hasProject;
+    const isEntryHome = this.state.routeName === 'home'
+      && this.state.activeSectionKey === 'entry'
+      && !this.state.hasProject;
     const showSound = this.state.routeName === 'home' && !this.state.hasProject;
-    const showLogo = isIglooHome || isCubesHome;
+    const showLogo = isIglooHome || isCubesHome || isEntryHome;
     const panelProgress = isIglooHome ? (this.state.iglooPresentation?.panelProgress ?? 0) : 0;
     const brandProgress = isIglooHome ? (this.state.iglooPresentation?.brandProgress ?? panelProgress) : 0;
     const titleProgress = isIglooHome ? (this.state.iglooPresentation?.titleProgress ?? panelProgress) : 0;
@@ -677,8 +680,8 @@ export class WebGLUiScene {
     this.manifestoGroup.visible = isIglooHome;
     this.soundGroup.visible = showSound;
 
-    this.logoMesh.material.uniforms.uShow.value = isIglooHome ? brandProgress : (isCubesHome ? 1 : 0);
-    this.logoMesh.material.uniforms.uOpacity.value = isIglooHome ? brandProgress : (isCubesHome ? 1 : 0);
+    this.logoMesh.material.uniforms.uShow.value = isIglooHome ? brandProgress : ((isCubesHome || isEntryHome) ? 1 : 0);
+    this.logoMesh.material.uniforms.uOpacity.value = isIglooHome ? brandProgress : ((isCubesHome || isEntryHome) ? 1 : 0);
     this.logoMesh.position.y = heightFromTop(this.size.height, this.layoutState.topMargin, this.layoutState.logoHeight * 0.5)
       - (1 - (isIglooHome ? brandProgress : 1)) * 10 * this.uiScale;
 

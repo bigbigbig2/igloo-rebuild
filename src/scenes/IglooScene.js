@@ -829,6 +829,10 @@ export class IglooScene extends SceneBase {
     return this.finalScrollAutocenter;
   }
 
+  setPointer(pointer = null) {
+    void pointer;
+  }
+
   setSize(width, height) {
     super.setSize(width, height);
 
