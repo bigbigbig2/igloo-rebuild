@@ -102,6 +102,127 @@ function createLayerMaterial({
   });
 }
 
+function createMountainMaterial({ map, triangles, noise }) {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uColor1: { value: new THREE.Color(SKY_COLOR_A) },
+      uColor2: { value: new THREE.Color(SKY_COLOR_B) },
+      uResolution: { value: new THREE.Vector2(1, 1) },
+      uProgress: { value: 1 },
+      uProgress2: { value: 1 },
+      uTriangleAlpha: { value: 1 },
+      uAlpha: { value: 1 },
+      tMap: { value: map ?? null },
+      tTriangles: { value: triangles ?? null },
+      tNoise: { value: noise ?? null },
+    },
+    vertexShader: /* glsl */ `
+      varying vec2 vUv;
+      varying vec3 vPos;
+      varying vec3 vWorldPos;
+      varying vec4 vMvPos;
+
+      void main() {
+        vUv = uv;
+        vPos = position;
+        vMvPos = modelViewMatrix * vec4(position, 1.0);
+        vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
+        gl_Position = projectionMatrix * vMvPos;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform vec3 uColor1;
+      uniform vec3 uColor2;
+      uniform vec2 uResolution;
+      uniform sampler2D tMap;
+      uniform sampler2D tTriangles;
+      uniform sampler2D tNoise;
+      uniform float uProgress;
+      uniform float uProgress2;
+      uniform float uTriangleAlpha;
+      uniform float uAlpha;
+
+      varying vec2 vUv;
+      varying vec3 vPos;
+      varying vec4 vMvPos;
+      varying vec3 vWorldPos;
+
+      float falloff(float value, float start, float end, float width, float progress) {
+        float edge = mix(start, end, clamp(progress, 0.0, 1.0));
+        return smoothstep(edge - width, edge, value) * (1.0 - smoothstep(edge, edge + width, value));
+      }
+
+      float falloffSmooth(float value, float start, float end, float width, float progress) {
+        float edge = mix(start, end, clamp(progress, 0.0, 1.0));
+        return smoothstep(edge - width, edge + width, value);
+      }
+
+      void main() {
+        vec2 safeResolution = max(uResolution, vec2(1.0));
+        vec2 screenUv = gl_FragCoord.xy / safeResolution;
+        float grad = pow((screenUv.x + screenUv.y) * 0.5, 2.0);
+        vec3 fogColor = mix(uColor2, uColor1, grad);
+
+        vec3 color = texture2D(tMap, vUv).rgb;
+        float alpha = 1.0;
+
+        float distanceFog = clamp(-vMvPos.z * 0.005, 0.0, 1.0);
+        float fog = clamp(1.0 - vWorldPos.y * 0.05 - 0.5, 0.0, 1.0);
+        fog += distanceFog * 0.75;
+
+        if (uProgress2 < 0.999) {
+          vec3 originalColor = color;
+          float noiseSample = texture2D(tNoise, vWorldPos.xz * 0.07).r;
+          float trianglesSample = texture2D(tTriangles, vWorldPos.xz * 0.25).r;
+          vec3 blue = vec3(0.3, 0.45, 1.0);
+          float inputGradient = length(vWorldPos.xz) + noiseSample * 3.5;
+
+          float backgroundMask = smoothstep(32.0, 36.0, inputGradient);
+          float foregroundMask = 1.0 - backgroundMask;
+
+          alpha = backgroundMask * uAlpha;
+
+          vec3 terrainShockwaveColor = vec3(0.0);
+          float terrainShockwaveAlpha = 0.0;
+          float terrainFalloff = 1.0 - falloffSmooth(inputGradient, 0.0, 32.0, 8.0, uProgress2);
+          float terrainFalloff2 = 1.0 - falloffSmooth(inputGradient, 0.0, 32.0, 3.0, uProgress2);
+          terrainShockwaveColor += terrainFalloff * trianglesSample * blue * 3.0;
+          terrainShockwaveColor += terrainFalloff2 * blue;
+          terrainShockwaveAlpha += falloff(inputGradient, -0.1, 31.9, 0.1, uProgress2);
+
+          vec3 triangleShockwaveColor = vec3(0.0);
+          float triangleShockwaveAlpha = 0.0;
+          float triangleFalloff = 1.0 - falloffSmooth(inputGradient, 0.0, 32.0, 10.0, uProgress);
+          triangleShockwaveColor += blue;
+          triangleShockwaveAlpha += falloff(inputGradient, 1.0, 33.0, 0.1, uProgress);
+          triangleShockwaveAlpha *= triangleFalloff;
+          triangleShockwaveAlpha *= trianglesSample * uTriangleAlpha;
+
+          color += terrainShockwaveColor * foregroundMask;
+          alpha += terrainShockwaveAlpha * foregroundMask;
+
+          color += triangleShockwaveColor * (1.0 - terrainShockwaveAlpha) * foregroundMask;
+          alpha += triangleShockwaveAlpha * (1.0 - terrainShockwaveAlpha) * foregroundMask;
+
+          float endMix = smoothstep(0.8, 1.0, uProgress2);
+          color = mix(color, originalColor, endMix);
+        }
+
+        alpha = clamp(alpha, 0.0, 1.0);
+        alpha *= 1.0 - smoothstep(0.7, 0.9, length(vPos.xz) * 0.1085);
+        color = clamp(color, vec3(0.0), vec3(1.0));
+        color = mix(color, fogColor * 1.1 + smoothstep(0.5, 1.0, color.r), clamp(fog, 0.0, 1.0));
+
+        alpha *= uAlpha;
+        gl_FragColor = vec4(color, alpha);
+      }
+    `,
+    transparent: true,
+    depthWrite: true,
+    depthTest: true,
+  });
+}
+
 function createSkyMaterial() {
   return new THREE.ShaderMaterial({
     uniforms: {
@@ -486,6 +607,7 @@ export class IglooScene extends SceneBase {
     this.presentationState = this.computePresentationState(0);
 
     this.camera.fov = 30;
+    this.camera.far = 1020;
     this.camera.updateProjectionMatrix();
 
     const ambient = new THREE.AmbientLight('#f3f6fb', 1.35);
@@ -536,6 +658,7 @@ export class IglooScene extends SceneBase {
     const groundSansIglooColor = assets.get('texture', 'ground-sansigloo-color');
     const mountainColor = assets.get('texture', 'mountain-color');
     const trianglesTiling = assets.get('texture', 'triangles-tiling');
+    const mosaicNoise = assets.get('texture', 'mosaic-noise');
     const cloudsNoise = assets.get('texture', 'clouds-noise');
     const windNoise = assets.get('texture', 'wind-noise');
     const shellNoise = assets.get('texture', 'detail-perlin') ?? windNoise;
@@ -614,19 +737,17 @@ export class IglooScene extends SceneBase {
       mountainSpecs.forEach((specification) => {
         const mesh = new THREE.Mesh(
           mountainGeometry,
-          createLayerMaterial({
+          createMountainMaterial({
             map: mountainColor,
             triangles: trianglesTiling,
-            accent: '#9eb8e6',
-            brightness: 0.94,
-            triangleStrength: 0.035,
-            opacity: 0.95
-          })
+            noise: mosaicNoise,
+          }),
         );
 
         mesh.position.set(...specification.position);
         mesh.scale.set(...specification.scale);
         mesh.rotation.set(...specification.rotation);
+        mesh.renderOrder = 1;
         this.root.add(mesh);
         this.mountains.push({
           mesh,
@@ -842,6 +963,20 @@ export class IglooScene extends SceneBase {
     }
   }
 
+  prepareForRender(renderer, renderState = {}) {
+    void renderer;
+    const width = renderState.renderWidth ?? renderState.width ?? 1;
+    const height = renderState.renderHeight ?? renderState.height ?? 1;
+
+    this.mountains.forEach(({ mesh }) => {
+      const resolution = mesh.material?.uniforms?.uResolution?.value;
+
+      if (resolution) {
+        resolution.set(width, height);
+      }
+    });
+  }
+
   updateSnowField(elapsed, strength) {
     if (!this.snowParticles) {
       return;
@@ -914,8 +1049,15 @@ export class IglooScene extends SceneBase {
         basePosition.y,
         basePosition.z
       );
-      mesh.material.uniforms.uOpacity.value = THREE.MathUtils.lerp(0.95, 0.82, this.progress) * sectionPresence;
-      mesh.material.uniforms.uTriangleStrength.value = THREE.MathUtils.lerp(0.035, 0.015, this.progress);
+      if (mesh.material.uniforms.uAlpha) {
+        mesh.material.uniforms.uAlpha.value = sectionPresence;
+      }
+      if (mesh.material.uniforms.uProgress) {
+        mesh.material.uniforms.uProgress.value = this.introProgress;
+      }
+      if (mesh.material.uniforms.uProgress2) {
+        mesh.material.uniforms.uProgress2.value = this.introProgress;
+      }
     });
 
     this.terrainChunks.forEach(({ mesh, basePosition, baseRotation }, index) => {

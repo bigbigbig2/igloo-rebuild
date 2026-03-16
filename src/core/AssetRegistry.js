@@ -187,6 +187,12 @@ export class AssetRegistry {
       texture.wrapT = THREE.RepeatWrapping;
     }
 
+    if (entry.filter === 'nearest') {
+      texture.minFilter = THREE.NearestFilter;
+      texture.magFilter = THREE.NearestFilter;
+      texture.generateMipmaps = false;
+    }
+
     if (Array.isArray(entry.repeat) && entry.repeat.length === 2) {
       texture.repeat.set(entry.repeat[0], entry.repeat[1]);
     }

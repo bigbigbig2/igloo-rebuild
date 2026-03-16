@@ -31,6 +31,7 @@ export const assetManifest = {
     { section: 'igloo', key: 'ground-sansigloo-color', source: '/reference-assets/images/igloo/ground_sansigloo_color.ktx2', colorSpace: 'srgb' },
     { section: 'igloo', key: 'mountain-color', source: '/reference-assets/images/igloo/mountain_color.ktx2', colorSpace: 'srgb' },
     { section: 'igloo', key: 'triangles-tiling', source: '/reference-assets/images/igloo/triangles_tiling.ktx2', colorSpace: 'srgb', wrap: 'repeat', repeat: [2, 2] },
+    { section: 'igloo', key: 'mosaic-noise', source: '/reference-assets/images/mosaic.ktx2', colorSpace: 'srgb', wrap: 'repeat', filter: 'nearest' },
     { section: 'igloo', key: 'clouds-noise', source: '/reference-assets/images/clouds_noise.ktx2', colorSpace: 'srgb', wrap: 'repeat', repeat: [2, 2] },
     { section: 'igloo', key: 'wind-noise', source: '/reference-assets/images/wind_noise.ktx2', wrap: 'repeat', repeat: [2, 2] },
     { section: 'igloo', key: 'igloo-scene-lut', source: '/reference-assets/images/igloo/igloo_scene.ktx2' },

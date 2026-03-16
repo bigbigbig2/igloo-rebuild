@@ -3,6 +3,7 @@ import { EventBus } from './core/EventBus.js';
 import { Router } from './core/Router.js';
 import { Engine } from './core/Engine.js';
 import { SiteController } from './controllers/SiteController.js';
+import { AudioDebugGui } from './debug/AudioDebugGui.js';
 
 const root = document.querySelector('#app');
 
@@ -35,6 +36,7 @@ const controller = new SiteController({
   engine,
   uiContainer
 });
+let audioDebugGui = null;
 
 bus.on('assets:preload-start', ({ total }) => {
   bootStatus.textContent = `Loading reference assets 0/${total}...`;
@@ -47,8 +49,11 @@ bus.on('assets:progress', ({ loaded, total, group, key }) => {
 async function bootstrap() {
   try {
     await controller.init();
+    audioDebugGui = new AudioDebugGui({ controller });
     bootStatus.remove();
     router.start();
+    window.__IGLOO_REBUILD__.audio = controller.audio;
+    window.__IGLOO_REBUILD__.audioDebugGui = audioDebugGui;
   } catch (error) {
     console.error(error);
     bootStatus.textContent = 'Boot failed. Check the console and asset paths.';
@@ -61,5 +66,7 @@ window.__IGLOO_REBUILD__ = {
   bus,
   router,
   engine,
-  controller
+  controller,
+  audio: controller.audio,
+  audioDebugGui
 };

@@ -13,6 +13,7 @@ import { RouteSync } from './RouteSync.js';
 import { HomeSceneStack } from './HomeSceneStack.js';
 import { HomeSceneRenderer } from './HomeSceneRenderer.js';
 import { DetailTransitionState } from './DetailTransitionState.js';
+import { AudioController } from './AudioController.js';
 
 export class MainController {
   constructor({ bus, router, engine, uiContainer }) {
@@ -21,6 +22,10 @@ export class MainController {
     this.engine = engine;
     this.content = siteContent;
     this.assets = new AssetRegistry(assetManifest, { bus });
+    this.audio = new AudioController({
+      assets: this.assets,
+      content: this.content
+    });
     this.ready = false;
 
     this.routeSync = new RouteSync({ router });
@@ -74,6 +79,11 @@ export class MainController {
 
     this.routeSync.onChange(this.onRouteChange);
     this.bus.on('tick', this.onTick);
+    this.audio.onChange(() => {
+      if (this.ready) {
+        this.syncUi();
+      }
+    });
     window.addEventListener('wheel', this.onWheel, { passive: false });
     this.engine.renderer.domElement.addEventListener('pointermove', this.onPointerMove);
     this.engine.renderer.domElement.addEventListener('pointerleave', this.onPointerLeave);
@@ -108,6 +118,12 @@ export class MainController {
     this.ready = true;
 
     this.syncHomeScene();
+    this.audio.update(0, {
+      routeName: this.route.name,
+      activeSectionKey: this.homeState?.key ?? null,
+      hasProject: Boolean(this.currentProject),
+      detailUiProgress: this.detailPhases.uiProgress
+    });
     this.syncUi();
   }
 
@@ -115,8 +131,17 @@ export class MainController {
     this.routeSync.goHome();
   }
 
+  setAudioMuted(muted) {
+    this.audio?.setMuted(muted);
+  }
+
+  toggleAudioMute() {
+    this.audio?.toggleMute();
+  }
+
   openProject(hash) {
     const cubesScrollStart = this.homeSceneStack.getScrollStartForKey('cubes');
+    this.audio?.play('click-project');
 
     this.setHoveredProject(null);
     this.homeScrollSnapshot = this.scrollState.current;
@@ -408,6 +433,12 @@ export class MainController {
     }
 
     this.syncHomeScene();
+    this.audio?.update(delta, {
+      routeName: this.route.name,
+      activeSectionKey: this.homeState?.key ?? null,
+      hasProject: Boolean(this.currentProject),
+      detailUiProgress: this.detailPhases.uiProgress
+    });
     this.maybeAutoCenter(elapsed);
 
     if (
@@ -483,7 +514,7 @@ export class MainController {
       hasProject: Boolean(uiState.project),
       iglooPresentation: uiState.iglooPresentation,
       cubesPresentation: uiState.cubesPresentation,
-      muted: this.content.audio?.muted ?? true,
+      muted: this.audio?.muted ?? this.content.audio?.muted ?? true,
       brand: this.content.brand,
       copyright: this.content.manifesto.copyright,
       rights: this.content.manifesto.rights,
