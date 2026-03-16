@@ -11,6 +11,17 @@ export class SceneBase extends THREE.Scene {
     this.name = name;
     this.progress = 0;
     this.active = false;
+    this.transitionState = {
+      role: 'inactive',
+      sectionKey: name,
+      currentKey: null,
+      previousKey: null,
+      nextKey: null,
+      blend: 0,
+      enterProgress: 0,
+      exitProgress: 0,
+      isTransitioning: false
+    };
     this.root = new THREE.Group();
     this.add(this.root);
     this.background = new THREE.Color(background);
@@ -30,6 +41,13 @@ export class SceneBase extends THREE.Scene {
 
   setProgress(progress) {
     this.progress = progress;
+  }
+
+  setTransitionState(transitionState = {}) {
+    this.transitionState = {
+      ...this.transitionState,
+      ...transitionState
+    };
   }
 
   setSize(width, height) {

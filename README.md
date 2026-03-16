@@ -2,6 +2,13 @@
 
 This repository is the clean-room reconstruction workspace for the dumped `www.igloo.inc` production build.
 
+## Planning Docs
+
+- `docs/reverse-engineering-roadmap.md`
+  - Reverse-engineering analysis, migration order and reconstruction roadmap.
+- `docs/phase-0/README.md`
+  - Phase 0 reverse-engineering dossier and extracted notes.
+
 ## Stack
 
 - Vite

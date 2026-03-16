@@ -8,22 +8,29 @@ export function prepareGeometry(sourceGeometry, options = {}) {
   const {
     size = 1,
     align = 'center',
-    recomputeNormals = true
+    recomputeNormals = true,
+    center = true,
+    scaleToSize = true
   } = options;
   const geometry = sourceGeometry.clone();
 
   geometry.computeBoundingBox();
-  geometry.center();
 
-  const box = geometry.boundingBox || new THREE.Box3();
-  const boundsSize = new THREE.Vector3();
-  box.getSize(boundsSize);
+  if (center) {
+    geometry.center();
+    geometry.computeBoundingBox();
+  }
 
-  const maxDimension = Math.max(boundsSize.x, boundsSize.y, boundsSize.z) || 1;
-  const scale = size / maxDimension;
-  geometry.scale(scale, scale, scale);
+  if (scaleToSize) {
+    const box = geometry.boundingBox || new THREE.Box3();
+    const boundsSize = new THREE.Vector3();
+    box.getSize(boundsSize);
 
-  geometry.computeBoundingBox();
+    const maxDimension = Math.max(boundsSize.x, boundsSize.y, boundsSize.z) || 1;
+    const scale = size / maxDimension;
+    geometry.scale(scale, scale, scale);
+    geometry.computeBoundingBox();
+  }
 
   if (align === 'ground' && geometry.boundingBox) {
     geometry.translate(0, -geometry.boundingBox.min.y, 0);

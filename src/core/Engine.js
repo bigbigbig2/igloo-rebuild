@@ -4,6 +4,7 @@ export class Engine {
   constructor({ container, bus }) {
     this.container = container;
     this.bus = bus;
+    this.view = null;
     this.scene = null;
     this.clock = new THREE.Clock();
     this.frame = 0;
@@ -36,21 +37,29 @@ export class Engine {
     this.start();
   }
 
-  setScene(scene) {
-    if (this.scene === scene) {
+  setView(view) {
+    if (this.view === view) {
       return;
     }
 
-    if (this.scene) {
-      this.scene.setActive(false);
+    if (this.view?.setActive) {
+      this.view.setActive(false);
     }
 
-    this.scene = scene;
+    this.view = view;
+    this.scene = view?.isScene ? view : null;
 
-    if (this.scene) {
-      this.scene.setActive(true);
-      this.scene.setSize(this.size.width, this.size.height);
+    if (this.view?.setActive) {
+      this.view.setActive(true);
     }
+
+    if (this.view?.setSize) {
+      this.view.setSize(this.size.width, this.size.height, this.size.pixelRatio);
+    }
+  }
+
+  setScene(scene) {
+    this.setView(scene);
   }
 
   start() {
@@ -79,8 +88,8 @@ export class Engine {
     this.renderer.setPixelRatio(pixelRatio);
     this.renderer.setSize(width, height, false);
 
-    if (this.scene) {
-      this.scene.setSize(width, height);
+    if (this.view?.setSize) {
+      this.view.setSize(width, height, pixelRatio);
     }
 
     this.bus.emit('resize', { ...this.size });
@@ -103,9 +112,14 @@ export class Engine {
 
     this.bus.emit('tick', frameState);
 
-    if (this.scene) {
-      this.scene.update(delta, elapsed, frameState);
-      this.renderer.render(this.scene, this.scene.camera);
+    if (this.view) {
+      this.view.update?.(delta, elapsed, frameState);
+
+      if (typeof this.view.render === 'function') {
+        this.view.render(this.renderer, frameState);
+      } else if (this.view.camera) {
+        this.renderer.render(this.view, this.view.camera);
+      }
     }
 
     this.bus.emit('after-render', frameState);
@@ -116,6 +130,7 @@ export class Engine {
   destroy() {
     this.stop();
     window.removeEventListener('resize', this.onResize);
+    this.view?.dispose?.();
     this.renderer.dispose();
     this.container.innerHTML = '';
   }
