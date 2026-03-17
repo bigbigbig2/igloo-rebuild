@@ -8,6 +8,20 @@ const FOG_FAR = 90;
 const SKY_COLOR_A = '#d1d6e3';
 const SKY_COLOR_B = '#afb6c7';
 const SKY_INTRO_COLOR = '#b3bac9';
+const DEFAULT_IGLOO_INTRO_DEBUG_SETTINGS = Object.freeze({
+  terrainRevealMaxDist: 32,
+  terrainRevealNoiseStrength: 3.5,
+  terrainRevealInnerWidth: 3.5,
+  terrainRevealOuterWidth: 2.5,
+  terrainShockwaveWidth: 0.1,
+  triangleShockwaveWidth: 0.1,
+  iglooGlowStrength: 0.4,
+  bloomStrengthScale: 0.3,
+  frostTint: '#e0ebff',
+  frostTintStrength: 2,
+  mountainMaskStart: 32,
+  mountainMaskEnd: 36
+});
 
 function clamp01(value) {
   return Math.min(Math.max(value, 0), 1);
@@ -40,12 +54,83 @@ function easeSineIn(value) {
   return 1 - Math.cos(clamp01(value) * Math.PI * 0.5);
 }
 
+function easePower2InOut(value) {
+  const t = clamp01(value);
+  return t < 0.5
+    ? 2 * t * t
+    : 1 - (Math.pow(-2 * t + 2, 2) * 0.5);
+}
+
+function cubicBezierCoordinate(a1, a2, t) {
+  const inverse = 1 - t;
+  return 3 * a1 * inverse * inverse * t + 3 * a2 * inverse * t * t + t * t * t;
+}
+
+function cubicBezierEase(value, x1, y1, x2, y2) {
+  const target = clamp01(value);
+  let lower = 0;
+  let upper = 1;
+  let current = target;
+
+  for (let iteration = 0; iteration < 12; iteration += 1) {
+    current = (lower + upper) * 0.5;
+    const estimate = cubicBezierCoordinate(x1, x2, current);
+
+    if (Math.abs(estimate - target) < 1e-5) {
+      break;
+    }
+
+    if (estimate < target) {
+      lower = current;
+    } else {
+      upper = current;
+    }
+  }
+
+  return cubicBezierCoordinate(y1, y2, current);
+}
+
+function timedEase(value, start, duration, easing = (input) => input) {
+  if (duration <= 0) {
+    return value >= start ? 1 : 0;
+  }
+
+  return easing(clamp01((value - start) / duration));
+}
+
 function ramp(value, start, duration) {
   return smoothWindow(value, start, start + duration);
 }
 
 function fadeWindow(value, fadeInStart, fadeInDuration, fadeOutStart, fadeOutDuration) {
   return ramp(value, fadeInStart, fadeInDuration) * (1 - ramp(value, fadeOutStart, fadeOutDuration));
+}
+
+function getIntroDebugUniformValues(overrides = {}) {
+  const settings = {
+    ...DEFAULT_IGLOO_INTRO_DEBUG_SETTINGS,
+    ...overrides
+  };
+  const frostTint = new THREE.Color(DEFAULT_IGLOO_INTRO_DEBUG_SETTINGS.frostTint);
+
+  if (typeof settings.frostTint === 'string' && settings.frostTint.trim()) {
+    frostTint.set(settings.frostTint);
+  }
+
+  return {
+    revealMaxDist: settings.terrainRevealMaxDist,
+    revealNoiseStrength: settings.terrainRevealNoiseStrength,
+    revealInnerWidth: settings.terrainRevealInnerWidth,
+    revealOuterWidth: settings.terrainRevealOuterWidth,
+    terrainShockwaveWidth: settings.terrainShockwaveWidth,
+    triangleShockwaveWidth: settings.triangleShockwaveWidth,
+    iglooGlowStrength: settings.iglooGlowStrength,
+    bloomStrengthScale: settings.bloomStrengthScale,
+    frostTint,
+    frostTintStrength: settings.frostTintStrength,
+    mountainMaskStart: settings.mountainMaskStart,
+    mountainMaskEnd: settings.mountainMaskEnd
+  };
 }
 
 function createIglooPieceAnimationData(sourceGeometry) {
@@ -141,35 +226,33 @@ function createIglooPieceAnimationData(sourceGeometry) {
   };
 }
 
-function createLayerMaterial({
+function createTerrainRevealMaterial({
   map,
+  wind,
   triangles,
   noise,
-  accent = '#9eb8e6',
-  brightness = 1,
-  triangleStrength = 0.25,
-  opacity = 1,
-  blending = THREE.NormalBlending,
-  side = THREE.FrontSide
+  edgeFadeExpression,
+  debugSettings = null
 }) {
+  const debugUniforms = getIntroDebugUniformValues(debugSettings);
+
   return new THREE.ShaderMaterial({
     uniforms: {
       uTime: { value: 0 },
-      uOpacity: { value: opacity },
-      uWhiten: { value: 0 },
-      uBrightness: { value: brightness },
-      uTriangleStrength: { value: triangleStrength },
       uProgress: { value: 1 },
       uProgress2: { value: 1 },
       uTriangleAlpha: { value: 1 },
-      uFogColor: { value: new THREE.Color(FOG_COLOR) },
-      uFogNear: { value: FOG_NEAR },
-      uFogFar: { value: FOG_FAR },
-      uAccent: { value: new THREE.Color(accent) },
-      uHasMap: { value: map ? 1 : 0 },
-      uHasTriangles: { value: triangles ? 1 : 0 },
-      uHasNoise: { value: noise ? 1 : 0 },
+      uAlpha: { value: 1 },
+      uRevealMaxDist: { value: debugUniforms.revealMaxDist },
+      uRevealNoiseStrength: { value: debugUniforms.revealNoiseStrength },
+      uRevealInnerWidth: { value: debugUniforms.revealInnerWidth },
+      uRevealOuterWidth: { value: debugUniforms.revealOuterWidth },
+      uTerrainShockwaveWidth: { value: debugUniforms.terrainShockwaveWidth },
+      uTriangleShockwaveWidth: { value: debugUniforms.triangleShockwaveWidth },
+      uFrostTint: { value: debugUniforms.frostTint.clone() },
+      uFrostTintStrength: { value: debugUniforms.frostTintStrength },
       tMap: { value: map ?? null },
+      tWind: { value: wind ?? null },
       tTriangles: { value: triangles ?? null },
       tNoise: { value: noise ?? null }
     },
@@ -177,41 +260,37 @@ function createLayerMaterial({
       varying vec2 vUv;
       varying vec3 vPos;
       varying vec3 vWorldPos;
-      varying float vFogDepth;
 
       void main() {
         vUv = uv;
         vPos = position;
         vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
         vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-        vFogDepth = -mvPosition.z;
         gl_Position = projectionMatrix * mvPosition;
       }
     `,
     fragmentShader: /* glsl */ `
       uniform float uTime;
-      uniform float uOpacity;
-      uniform float uWhiten;
-      uniform float uBrightness;
-      uniform float uTriangleStrength;
       uniform float uProgress;
       uniform float uProgress2;
       uniform float uTriangleAlpha;
-      uniform vec3 uFogColor;
-      uniform float uFogNear;
-      uniform float uFogFar;
-      uniform float uHasMap;
-      uniform float uHasTriangles;
-      uniform float uHasNoise;
-      uniform vec3 uAccent;
+      uniform float uAlpha;
+      uniform float uRevealMaxDist;
+      uniform float uRevealNoiseStrength;
+      uniform float uRevealInnerWidth;
+      uniform float uRevealOuterWidth;
+      uniform float uTerrainShockwaveWidth;
+      uniform float uTriangleShockwaveWidth;
+      uniform vec3 uFrostTint;
+      uniform float uFrostTintStrength;
       uniform sampler2D tMap;
+      uniform sampler2D tWind;
       uniform sampler2D tTriangles;
       uniform sampler2D tNoise;
 
       varying vec2 vUv;
       varying vec3 vPos;
       varying vec3 vWorldPos;
-      varying float vFogDepth;
 
       float falloff(float value, float start, float end, float width, float progress) {
         float edge = mix(start, end, clamp(progress, 0.0, 1.0));
@@ -224,65 +303,105 @@ function createLayerMaterial({
       }
 
       void main() {
-        vec3 baseSample = texture2D(tMap, vUv).rgb;
-        vec3 baseColor = mix(vec3(1.0), baseSample, uHasMap) * uBrightness;
-        float triangle = texture2D(tTriangles, vUv * 2.8 + vec2(uTime * 0.018, -uTime * 0.012)).r;
-        triangle *= uHasTriangles;
-        float flicker = sin(uTime * 1.3 + vPos.x * 0.8 + vPos.z * 0.65) * 0.5 + 0.5;
-        vec3 color = baseColor + uAccent * triangle * flicker * uTriangleStrength;
-        float alpha = uOpacity;
+        vec3 color = texture2D(tMap, vUv).rgb;
+        float alpha = 1.0;
+
+        float wind = texture2D(
+          tWind,
+          vWorldPos.xz * 0.1 + vWorldPos.xy * 0.1 + vec2(-uTime * 0.25, -uTime * 0.3)
+        ).r;
+        float verticalGrad = 1.0 - clamp(vPos.y * 0.5 + 0.75, 0.0, 1.0);
+        wind *= texture2D(
+          tWind,
+          vWorldPos.xz * 0.15 + vWorldPos.xy * 0.15 + vec2(-uTime * 0.18, -uTime * 0.225)
+        ).r;
+        wind *= verticalGrad;
+        wind *= color.r;
+        wind *= 2.0;
+        color += wind;
 
         if (uProgress2 < 0.999) {
-          float noiseSample = texture2D(tNoise, vWorldPos.xz * 0.07).r * uHasNoise;
-          float trianglesSample = texture2D(tTriangles, vWorldPos.xz * 0.25).r * uHasTriangles;
-          vec3 blue = vec3(0.3, 0.45, 1.0);
-          float inputGradient = length(vWorldPos.xz) + noiseSample * 3.5;
-          const float maxDist = 34.0;
+          vec3 originalColor = color;
+          alpha *= 0.0;
+
+          float noiseSample = texture2D(tNoise, vWorldPos.xz * 0.07).r;
+          float trianglesSample = texture2D(tTriangles, vWorldPos.xz * 0.25).r;
+          vec3 frostTint = clamp(uFrostTint * uFrostTintStrength, vec3(0.0), vec3(2.0));
+          float inputGradient = length(vWorldPos.xz) + noiseSample * uRevealNoiseStrength;
+          float maxDist = max(0.001, uRevealMaxDist);
           float revealRadius = mix(-1.0, maxDist, clamp(uProgress2, 0.0, 1.0));
-          float revealMask = 1.0 - smoothstep(revealRadius - 3.5, revealRadius + 2.5, inputGradient);
+          float revealMask = 1.0 - smoothstep(
+            revealRadius - uRevealInnerWidth,
+            revealRadius + uRevealOuterWidth,
+            inputGradient
+          );
 
           vec3 terrainShockwaveColor = vec3(0.0);
           float terrainShockwaveAlpha = 0.0;
           float terrainFalloff = 1.0 - falloffSmooth(inputGradient, 0.0, maxDist, 8.0, uProgress2);
           float terrainFalloff2 = 1.0 - falloffSmooth(inputGradient, 0.0, maxDist, 3.0, uProgress2);
-          terrainShockwaveColor += terrainFalloff * trianglesSample * blue * 3.0;
-          terrainShockwaveColor += terrainFalloff2 * blue;
-          terrainShockwaveAlpha += falloff(inputGradient, -0.1, maxDist - 0.1, 1.4, uProgress2);
+          terrainShockwaveColor += terrainFalloff * trianglesSample * frostTint * 2.2;
+          terrainShockwaveColor += terrainFalloff2 * frostTint * 0.72;
+          terrainShockwaveAlpha += falloff(inputGradient, -0.1, maxDist - 0.1, uTerrainShockwaveWidth, uProgress2);
 
           vec3 triangleShockwaveColor = vec3(0.0);
           float triangleShockwaveAlpha = 0.0;
           float triangleFalloff = 1.0 - falloffSmooth(inputGradient, 0.0, maxDist, 10.0, uProgress);
-          triangleShockwaveColor += blue;
-          triangleShockwaveAlpha += falloff(inputGradient, 1.0, maxDist + 1.0, 1.2, uProgress);
+          triangleShockwaveColor += frostTint * 0.9;
+          triangleShockwaveAlpha += falloff(inputGradient, 1.0, maxDist + 1.0, uTriangleShockwaveWidth, uProgress);
           triangleShockwaveAlpha *= triangleFalloff;
           triangleShockwaveAlpha *= trianglesSample * uTriangleAlpha;
 
           float edgeMask = clamp(terrainShockwaveAlpha + triangleShockwaveAlpha, 0.0, 1.0);
           vec3 edgeColor = terrainShockwaveColor + triangleShockwaveColor * (1.0 - terrainShockwaveAlpha);
-          color = mix(edgeColor, baseColor, smoothstep(0.08, 0.72, revealMask));
-          alpha = max(revealMask * uOpacity, edgeMask);
+          color = mix(edgeColor, originalColor, smoothstep(0.08, 0.72, revealMask));
+          alpha = max(revealMask, edgeMask);
 
           float endMix = smoothstep(0.82, 1.0, uProgress2);
-          color = mix(color, baseColor, endMix);
-          alpha = mix(alpha, uOpacity, endMix);
+          color = mix(color, originalColor, endMix);
+          alpha = mix(alpha, 1.0, endMix);
         }
 
-        float fogFactor = smoothstep(uFogNear, uFogFar, vFogDepth);
-        color = mix(color, uFogColor * 1.04 + smoothstep(0.45, 1.0, baseColor.r) * 0.08, fogFactor);
-        color = mix(color, vec3(0.965, 0.975, 1.0), uWhiten * 0.78);
-        alpha *= mix(1.0, 0.45, fogFactor);
+        alpha = clamp(alpha, 0.0, 1.0);
+        alpha *= ${edgeFadeExpression};
+        alpha *= uAlpha;
+        color = clamp(color, vec3(0.0), vec3(1.0));
+
         gl_FragColor = vec4(color, alpha);
       }
     `,
     transparent: true,
-    depthWrite: blending === THREE.NormalBlending,
+    depthWrite: true,
     depthTest: true,
-    blending,
-    side
+    side: THREE.DoubleSide
   });
 }
 
-function createMountainMaterial({ map, triangles, noise }) {
+function createTerrainChunkMaterial({ map, wind, triangles, noise, debugSettings = null }) {
+  return createTerrainRevealMaterial({
+    map,
+    wind,
+    triangles,
+    noise,
+    debugSettings,
+    edgeFadeExpression: '1.0 - smoothstep(0.85, 1.0, length(vPos.xz) * 0.1085)'
+  });
+}
+
+function createTerrainPatchMaterial({ map, wind, triangles, noise, debugSettings = null }) {
+  return createTerrainRevealMaterial({
+    map,
+    wind,
+    triangles,
+    noise,
+    debugSettings,
+    edgeFadeExpression: '1.0 - smoothstep(0.3, 0.48, length(vPos.xz))'
+  });
+}
+
+function createMountainMaterial({ map, triangles, noise, debugSettings = null }) {
+  const debugUniforms = getIntroDebugUniformValues(debugSettings);
+
   return new THREE.ShaderMaterial({
     uniforms: {
       uColor1: { value: new THREE.Color(SKY_COLOR_A) },
@@ -292,6 +411,16 @@ function createMountainMaterial({ map, triangles, noise }) {
       uProgress2: { value: 1 },
       uTriangleAlpha: { value: 1 },
       uAlpha: { value: 1 },
+      uRevealMaxDist: { value: debugUniforms.revealMaxDist },
+      uRevealNoiseStrength: { value: debugUniforms.revealNoiseStrength },
+      uRevealInnerWidth: { value: debugUniforms.revealInnerWidth },
+      uRevealOuterWidth: { value: debugUniforms.revealOuterWidth },
+      uTerrainShockwaveWidth: { value: debugUniforms.terrainShockwaveWidth },
+      uTriangleShockwaveWidth: { value: debugUniforms.triangleShockwaveWidth },
+      uFrostTint: { value: debugUniforms.frostTint.clone() },
+      uFrostTintStrength: { value: debugUniforms.frostTintStrength },
+      uMountainMaskStart: { value: debugUniforms.mountainMaskStart },
+      uMountainMaskEnd: { value: debugUniforms.mountainMaskEnd },
       tMap: { value: map ?? null },
       tTriangles: { value: triangles ?? null },
       tNoise: { value: noise ?? null },
@@ -321,6 +450,16 @@ function createMountainMaterial({ map, triangles, noise }) {
       uniform float uProgress2;
       uniform float uTriangleAlpha;
       uniform float uAlpha;
+      uniform float uRevealMaxDist;
+      uniform float uRevealNoiseStrength;
+      uniform float uRevealInnerWidth;
+      uniform float uRevealOuterWidth;
+      uniform float uTerrainShockwaveWidth;
+      uniform float uTriangleShockwaveWidth;
+      uniform vec3 uFrostTint;
+      uniform float uFrostTintStrength;
+      uniform float uMountainMaskStart;
+      uniform float uMountainMaskEnd;
 
       varying vec2 vUv;
       varying vec3 vPos;
@@ -354,36 +493,46 @@ function createMountainMaterial({ map, triangles, noise }) {
           vec3 originalColor = color;
           float noiseSample = texture2D(tNoise, vWorldPos.xz * 0.07).r;
           float trianglesSample = texture2D(tTriangles, vWorldPos.xz * 0.25).r;
-          vec3 blue = vec3(0.3, 0.45, 1.0);
-          float inputGradient = length(vWorldPos.xz) + noiseSample * 3.5;
-          const float maxDist = 120.0;
+          vec3 frostTint = clamp(uFrostTint * uFrostTintStrength, vec3(0.0), vec3(2.0));
+          float inputGradient = length(vWorldPos.xz) + noiseSample * uRevealNoiseStrength;
+          float maxDist = max(0.001, uRevealMaxDist);
           float revealRadius = mix(-1.0, maxDist, clamp(uProgress2, 0.0, 1.0));
-          float revealMask = 1.0 - smoothstep(revealRadius - 5.0, revealRadius + 3.5, inputGradient);
+          float revealMask = 1.0 - smoothstep(
+            revealRadius - uRevealInnerWidth,
+            revealRadius + uRevealOuterWidth,
+            inputGradient
+          );
+          float maskEnd = max(uMountainMaskStart + 0.001, uMountainMaskEnd);
+          float backgroundMountainsMask = smoothstep(uMountainMaskStart, maskEnd, inputGradient);
+          float invBackgroundMountainsMask = 1.0 - backgroundMountainsMask;
+          alpha = backgroundMountainsMask;
 
           vec3 terrainShockwaveColor = vec3(0.0);
           float terrainShockwaveAlpha = 0.0;
           float terrainFalloff = 1.0 - falloffSmooth(inputGradient, 0.0, maxDist, 12.0, uProgress2);
           float terrainFalloff2 = 1.0 - falloffSmooth(inputGradient, 0.0, maxDist, 4.0, uProgress2);
-          terrainShockwaveColor += terrainFalloff * trianglesSample * blue * 3.0;
-          terrainShockwaveColor += terrainFalloff2 * blue;
-          terrainShockwaveAlpha += falloff(inputGradient, -0.1, maxDist - 0.1, 2.0, uProgress2);
+          terrainShockwaveColor += terrainFalloff * trianglesSample * frostTint * 2.2;
+          terrainShockwaveColor += terrainFalloff2 * frostTint * 0.72;
+          terrainShockwaveAlpha += falloff(inputGradient, -0.1, maxDist - 0.1, uTerrainShockwaveWidth, uProgress2);
 
           vec3 triangleShockwaveColor = vec3(0.0);
           float triangleShockwaveAlpha = 0.0;
-          float triangleFalloff = 1.0 - falloffSmooth(inputGradient, 0.0, maxDist, 14.0, uProgress);
-          triangleShockwaveColor += blue;
-          triangleShockwaveAlpha += falloff(inputGradient, 1.0, maxDist + 1.0, 1.8, uProgress);
+          float triangleFalloff = 1.0 - falloffSmooth(inputGradient, 0.0, maxDist, 10.0, uProgress);
+          triangleShockwaveColor += frostTint * 0.9;
+          triangleShockwaveAlpha += falloff(inputGradient, 1.0, maxDist + 1.0, uTriangleShockwaveWidth, uProgress);
           triangleShockwaveAlpha *= triangleFalloff;
           triangleShockwaveAlpha *= trianglesSample * uTriangleAlpha;
 
           float edgeMask = clamp(terrainShockwaveAlpha + triangleShockwaveAlpha, 0.0, 1.0);
           vec3 edgeColor = terrainShockwaveColor + triangleShockwaveColor * (1.0 - terrainShockwaveAlpha);
-          color = mix(edgeColor, originalColor, smoothstep(0.08, 0.76, revealMask));
-          alpha = max(revealMask, edgeMask);
+          vec3 foregroundMountainColor = mix(edgeColor, originalColor, smoothstep(0.08, 0.72, revealMask));
+          float foregroundMountainAlpha = max(revealMask, edgeMask);
+          color = mix(foregroundMountainColor, originalColor, backgroundMountainsMask);
+          alpha = max(backgroundMountainsMask, foregroundMountainAlpha * invBackgroundMountainsMask);
 
-          float endMix = smoothstep(0.82, 1.0, uProgress2);
+          float endMix = smoothstep(0.8, 1.0, uProgress2);
           color = mix(color, originalColor, endMix);
-          alpha = mix(alpha, 1.0, endMix);
+          alpha = mix(alpha, 1.0, endMix * invBackgroundMountainsMask);
         }
 
         alpha = clamp(alpha, 0.0, 1.0);
@@ -446,8 +595,11 @@ function createIglooBaseMaterial({
   wind,
   triangles,
   noise,
-  mousePosition
+  mousePosition,
+  debugSettings = null
 }) {
+  const debugUniforms = getIntroDebugUniformValues(debugSettings);
+
   return new THREE.ShaderMaterial({
     uniforms: {
       uTime: { value: 0 },
@@ -457,6 +609,14 @@ function createIglooBaseMaterial({
       uProgress: { value: 1 },
       uProgress2: { value: 1 },
       uTriangleAlpha: { value: 1 },
+      uRevealMaxDist: { value: debugUniforms.revealMaxDist },
+      uRevealNoiseStrength: { value: debugUniforms.revealNoiseStrength },
+      uRevealInnerWidth: { value: debugUniforms.revealInnerWidth },
+      uRevealOuterWidth: { value: debugUniforms.revealOuterWidth },
+      uTerrainShockwaveWidth: { value: debugUniforms.terrainShockwaveWidth },
+      uTriangleShockwaveWidth: { value: debugUniforms.triangleShockwaveWidth },
+      uFrostTint: { value: debugUniforms.frostTint.clone() },
+      uFrostTintStrength: { value: debugUniforms.frostTintStrength },
       tMap: { value: map ?? null },
       tGroundGlow: { value: groundGlow ?? null },
       tWind: { value: wind ?? null },
@@ -470,16 +630,17 @@ function createIglooBaseMaterial({
       varying vec3 vMouseGlow;
 
       uniform vec3 uMousePos;
+      uniform vec3 uFrostTint;
 
       void main() {
         vUv = uv;
         vPos = position;
         vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
         vMouseGlow = (1.0 - clamp(distance(uMousePos, vWorldPos.xyz * vec3(1.0, 0.0, 1.0)), 0.0, 5.0) / 5.0)
-          * vec3(0.5, 0.7, 1.0)
+          * uFrostTint
           * smoothstep(-0.5, 2.0, uMousePos.y);
         vMouseGlow *= 1.0 - clamp(length(vWorldPos.xyz), 0.0, 9.0) / 9.0;
-        vMouseGlow *= 2.0;
+        vMouseGlow *= 1.7;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
       }
     `,
@@ -491,6 +652,14 @@ function createIglooBaseMaterial({
       uniform float uProgress;
       uniform float uProgress2;
       uniform float uTriangleAlpha;
+      uniform float uRevealMaxDist;
+      uniform float uRevealNoiseStrength;
+      uniform float uRevealInnerWidth;
+      uniform float uRevealOuterWidth;
+      uniform float uTerrainShockwaveWidth;
+      uniform float uTriangleShockwaveWidth;
+      uniform vec3 uFrostTint;
+      uniform float uFrostTintStrength;
       uniform sampler2D tMap;
       uniform sampler2D tGroundGlow;
       uniform sampler2D tWind;
@@ -530,34 +699,45 @@ function createIglooBaseMaterial({
         vec3 color = terrainColor;
 
         if (uProgress2 < 0.999) {
+          vec3 originalColor = color;
           alpha = 0.0;
 
           float noiseSample = texture2D(tNoise, vWorldPos.xz * 0.07).r;
           float trianglesSample = texture2D(tTriangles, vWorldPos.xz * 0.25).r;
-          vec3 blue = vec3(0.3, 0.45, 1.0);
-          float inputGradient = length(vWorldPos.xz) + noiseSample * 3.5;
+          vec3 frostTint = clamp(uFrostTint * uFrostTintStrength, vec3(0.0), vec3(2.0));
+          float maxDist = max(0.001, uRevealMaxDist);
+          float inputGradient = length(vWorldPos.xz) + noiseSample * uRevealNoiseStrength;
+          float revealRadius = mix(-1.0, maxDist, clamp(uProgress2, 0.0, 1.0));
+          float revealMask = 1.0 - smoothstep(
+            revealRadius - uRevealInnerWidth,
+            revealRadius + uRevealOuterWidth,
+            inputGradient
+          );
 
           vec3 terrainShockwaveColor = vec3(0.0);
           float terrainShockwaveAlpha = 0.0;
-          float terrainFalloff = 1.0 - falloffSmooth(inputGradient, 0.0, 32.0, 8.0, uProgress2);
-          float terrainFalloff2 = 1.0 - falloffSmooth(inputGradient, 0.0, 32.0, 3.0, uProgress2);
-          terrainShockwaveColor += terrainFalloff * trianglesSample * blue * 3.0;
-          terrainShockwaveColor += terrainFalloff2 * blue;
-          terrainShockwaveAlpha += falloff(inputGradient, -0.1, 31.9, 0.1, uProgress2);
+          float terrainFalloff = 1.0 - falloffSmooth(inputGradient, 0.0, maxDist, 8.0, uProgress2);
+          float terrainFalloff2 = 1.0 - falloffSmooth(inputGradient, 0.0, maxDist, 3.0, uProgress2);
+          terrainShockwaveColor += terrainFalloff * trianglesSample * frostTint * 2.2;
+          terrainShockwaveColor += terrainFalloff2 * frostTint * 0.72;
+          terrainShockwaveAlpha += falloff(inputGradient, -0.1, maxDist - 0.1, uTerrainShockwaveWidth, uProgress2);
 
           vec3 triangleShockwaveColor = vec3(0.0);
           float triangleShockwaveAlpha = 0.0;
-          float triangleFalloff = 1.0 - falloffSmooth(inputGradient, 0.0, 32.0, 10.0, uProgress);
-          triangleShockwaveColor += blue;
-          triangleShockwaveAlpha += falloff(inputGradient, 1.0, 33.0, 0.1, uProgress);
+          float triangleFalloff = 1.0 - falloffSmooth(inputGradient, 0.0, maxDist, 10.0, uProgress);
+          triangleShockwaveColor += frostTint * 0.9;
+          triangleShockwaveAlpha += falloff(inputGradient, 1.0, maxDist + 1.0, uTriangleShockwaveWidth, uProgress);
           triangleShockwaveAlpha *= triangleFalloff;
           triangleShockwaveAlpha *= trianglesSample * uTriangleAlpha;
 
-          color += terrainShockwaveColor;
-          alpha += terrainShockwaveAlpha;
+          float edgeMask = clamp(terrainShockwaveAlpha + triangleShockwaveAlpha, 0.0, 1.0);
+          vec3 edgeColor = terrainShockwaveColor + triangleShockwaveColor * (1.0 - terrainShockwaveAlpha);
+          color = mix(edgeColor, originalColor, smoothstep(0.08, 0.72, revealMask));
+          alpha = max(revealMask, edgeMask);
 
-          color += triangleShockwaveColor * (1.0 - terrainShockwaveAlpha);
-          alpha += triangleShockwaveAlpha * (1.0 - terrainShockwaveAlpha);
+          float endMix = smoothstep(0.82, 1.0, uProgress2);
+          color = mix(color, originalColor, endMix);
+          alpha = mix(alpha, 1.0, endMix);
         }
 
         color = mix(color, vec3(0.965, 0.972, 0.985), uWhiten * 0.9);
@@ -734,7 +914,7 @@ function createIglooShellMaterial({
         float alpha = uAlpha;
         vec3 baseColor = texture2D(tMap, vUv).rgb;
         vec3 exploded = texture2D(tMapExploded, vUv).rgb + 0.05;
-        vec3 blue = vec3(0.5, 0.7, 1.0);
+        vec3 iceGlow = vec3(0.82, 0.88, 0.98);
         float detailTrianglesMask = texture2D(tTriangles, vUv * 5.0 + vec2(uTime * 0.012, -uTime * 0.009)).r;
         float detailNoiseMask = texture2D(tNoise, vUv * 2.0 + vec2(uTime * 0.018, uTime * 0.011)).r;
         vec3 detailSeamGlow = max(exploded - baseColor, vec3(0.0));
@@ -762,33 +942,33 @@ function createIglooShellMaterial({
           float introEmissive = 1.0 - materializeMask;
           introEmissive = clamp(introEmissive, 0.0, 1.0);
           introEmissive += clamp(introEmissive * trianglesMask * 13.0, 0.0, 1.0);
-          color += introEmissive * blue * uIntroGlow;
+          color += introEmissive * iceGlow * uIntroGlow;
         }
 
         float idlePulse = sin(vPos.x - uTime + 3.2) * 0.5 + 0.5;
 
         #ifdef USE_IGLOO_PIECES
-        color += pow(vPieceEmission, 2.0) * clamp(vHoverDisplacement, 0.0, 1.0) * blue;
-        vec3 powEmission = pow(vPieceEmission, 8.0) * blue * 0.5;
+        color += pow(vPieceEmission, 2.0) * clamp(vHoverDisplacement, 0.0, 1.0) * iceGlow;
+        vec3 powEmission = pow(vPieceEmission, 8.0) * iceGlow * 0.46;
         color += powEmission * idlePulse;
         color += max(0.0, smoothstep(0.0, 2.0, vPos.x * 0.5 - vPos.z * 0.5)) * powEmission;
         color += (1.0 - smoothstep(-1.5, 1.0, vPos.y)) * clamp(vHoverMask * 1.6, 0.0, 1.0) * vec3(0.8, 0.9, 1.0) * 0.25;
         #else
-        vec3 pulseEmission = pow(max(detailSeamMask, detailTrianglesMask * 0.7), 6.0) * blue * 0.38;
+        vec3 pulseEmission = pow(max(detailSeamMask, detailTrianglesMask * 0.7), 6.0) * iceGlow * 0.32;
         color += detailSeamGlow * (0.82 + detailNoiseMask * 0.22);
         color += pulseEmission * idlePulse;
         color += max(0.0, smoothstep(0.0, 2.0, vPos.x * 0.5 - vPos.z * 0.5)) * pulseEmission;
         float hoverGlow = clamp(vHoverDisplacement * (0.9 + 0.5 * vHoverPulse), 0.0, 1.0);
         color += detailSeamGlow * hoverGlow * 0.3;
-        color += pow(max(vPieceEmission, detailSeamMask), 2.0) * blue * hoverGlow * 0.36;
-        color += blue * hoverGlow * (0.05 + 0.08 * min(uHoverVelocity * 1.6, 1.0));
+        color += pow(max(vPieceEmission, detailSeamMask), 2.0) * iceGlow * hoverGlow * 0.28;
+        color += iceGlow * hoverGlow * (0.04 + 0.06 * min(uHoverVelocity * 1.6, 1.0));
         #endif
         color += (vPos.x * 0.1 + 0.4) * 0.15 * min(vPos.y + 0.5, 1.0);
         color += (1.0 - smoothstep(-1.5, 1.0, vPos.y)) * vec3(0.8, 0.9, 1.0) * 0.22;
 
         vec3 viewDir = normalize(cameraPosition - vWorldPos);
         float fresnel = pow(1.0 - max(dot(vWorldNormal, viewDir), 0.0), 2.0);
-        color += blue * fresnel * 0.18;
+        color += iceGlow * fresnel * 0.18;
         color = mix(color, vec3(0.95, 0.962, 0.985), uWhiten * 0.72);
 
         gl_FragColor = vec4(clamp(color, vec3(0.0), vec3(1.0)), alpha);
@@ -1159,7 +1339,7 @@ export class IglooScene extends SceneBase {
     this.floorBaseColor = new THREE.Color('#c1c7d2');
     this.introProgress = 0;
     this.introElapsed = 0;
-    this.introDuration = 7.5;
+    this.introDuration = 8.2;
     this.introPlayed = false;
     this.introRenderReady = false;
     this.initialScrollAutocenter = 0.495;
@@ -1199,6 +1379,7 @@ export class IglooScene extends SceneBase {
     this.hoverStrengthTarget = 0;
     this.hoverVelocity = 0;
     this.usingPieceHover = false;
+    this.introDebugSettings = { ...DEFAULT_IGLOO_INTRO_DEBUG_SETTINGS };
     this.debugHoverLogging = false;
     this.debugHoverLastLogTime = -Infinity;
     this.debugHoverMaxDisplacement = 0;
@@ -1212,7 +1393,7 @@ export class IglooScene extends SceneBase {
     const ambient = new THREE.AmbientLight('#f3f6fb', 1.35);
     const keyLight = new THREE.DirectionalLight('#ffffff', 1.2);
     keyLight.position.set(8, 10, 4);
-    this.fillLight = new THREE.PointLight('#dcecff', 4.5, 26, 2);
+    this.fillLight = new THREE.PointLight('#dcecff', 3.4, 26, 2);
     this.fillLight.position.set(-1.2, 1.45, 2.6);
     this.add(ambient, keyLight, this.fillLight);
 
@@ -1297,7 +1478,8 @@ export class IglooScene extends SceneBase {
         wind: windNoise,
         triangles: trianglesTiling,
         noise: mosaicNoise,
-        mousePosition: this.pointerWorld
+        mousePosition: this.pointerWorld,
+        debugSettings: this.introDebugSettings
       })
     );
     this.floor.renderOrder = 2;
@@ -1367,6 +1549,7 @@ export class IglooScene extends SceneBase {
             map: mountainColor,
             triangles: trianglesTiling,
             noise: mosaicNoise,
+            debugSettings: this.introDebugSettings
           }),
         );
 
@@ -1386,31 +1569,29 @@ export class IglooScene extends SceneBase {
 
     if (groundGeometry) {
       const terrainSpecs = [
-        { position: [-3.76, -0.58, 12.5], scale: [0.6, 0.6, 0.6], rotation: [-0.0890, 0.0, 0.0] },
-        { position: [-17.63, -0.01, 2.0], scale: [1.0, 1.0, 1.0], rotation: [0.0471, 0.0140, 0.0] },
-        { position: [3.12, -0.75, -1.02], scale: [1.5, 0.66, 1.5], rotation: [0.0, 0.0, 0.0] },
-        { position: [6.0, 0.16, 15.78], scale: [1.0, 1.0, 1.0], rotation: [0.0192, 0.0, 0.1222] },
-        { position: [16.06, 0.34, 4.0], scale: [1.0, 1.0, 1.0], rotation: [0.0, 0.0, 0.0] }
+        { position: [-3.76, -0.58, 12.5], scale: [0.6, 0.6, 0.6], rotation: [-0.0890, 0.0, 0.0], renderOrder: 1 },
+        { position: [-17.63, -0.01, 2.0], scale: [1.0, 1.0, 1.0], rotation: [0.0471, 0.0140, 0.0], renderOrder: 3 },
+        { position: [3.12, -0.75, -1.02], scale: [1.5, 0.66, 1.5], rotation: [0.0, 0.0, 0.0], renderOrder: 1 },
+        { position: [6.0, 0.16, 15.78], scale: [1.0, 1.0, 1.0], rotation: [0.0192, 0.0, 0.1222], renderOrder: 2 },
+        { position: [16.06, 0.34, 4.0], scale: [1.0, 1.0, 1.0], rotation: [0.0, 0.0, 0.0], renderOrder: 2 }
       ];
 
       terrainSpecs.forEach((specification) => {
         const mesh = new THREE.Mesh(
           groundGeometry.clone(),
-          createLayerMaterial({
+          createTerrainChunkMaterial({
             map: groundSansIglooColor,
+            wind: windNoise,
             triangles: trianglesTiling,
             noise: mosaicNoise,
-            accent: '#8ab6ff',
-            brightness: 0.96,
-            triangleStrength: 0.04,
-            opacity: 0.95,
-            side: THREE.DoubleSide
+            debugSettings: this.introDebugSettings
           })
         );
 
         mesh.position.set(...specification.position);
         mesh.scale.set(...specification.scale);
         mesh.rotation.set(...specification.rotation);
+        mesh.renderOrder = specification.renderOrder;
         this.root.add(mesh);
         this.terrainChunks.push({
           mesh,
@@ -1424,28 +1605,26 @@ export class IglooScene extends SceneBase {
 
     if (patchGeometry) {
       const patchSpecs = [
-        { position: [-9.34, -1.77, 6.96], scale: [7.0, 7.0, 7.0], rotation: [0.0, 0.0, 0.0] },
-        { position: [-8.82, -1.35, 11.69], scale: [8.0, 8.0, 8.0], rotation: [-0.0960, -0.4468, 0.0] }
+        { position: [-9.34, -1.77, 6.96], scale: [7.0, 7.0, 7.0], rotation: [0.0, 0.0, 0.0], renderOrder: 0 },
+        { position: [-8.82, -1.35, 11.69], scale: [8.0, 8.0, 8.0], rotation: [-0.0960, -0.4468, 0.0], renderOrder: 0 }
       ];
 
       patchSpecs.forEach((specification) => {
         const mesh = new THREE.Mesh(
           patchGeometry,
-          createLayerMaterial({
+          createTerrainPatchMaterial({
             map: groundSansIglooColor,
+            wind: windNoise,
             triangles: trianglesTiling,
             noise: mosaicNoise,
-            accent: '#8ab6ff',
-            brightness: 0.94,
-            triangleStrength: 0.045,
-            opacity: 0.88,
-            side: THREE.DoubleSide
+            debugSettings: this.introDebugSettings
           })
         );
 
         mesh.position.set(...specification.position);
         mesh.scale.set(...specification.scale);
         mesh.rotation.set(...specification.rotation);
+        mesh.renderOrder = specification.renderOrder;
         this.root.add(mesh);
         this.terrainPatches.push({
           mesh,
@@ -1535,8 +1714,140 @@ export class IglooScene extends SceneBase {
     this.root.add(this.snowParticles);
     this.shaderMaterials.push(this.snowParticles.material);
 
+    this.applyIntroDebugUniforms();
     this.camera.position.copy(this.introCameraPosition);
     this.camera.lookAt(this.introCameraTarget);
+  }
+
+  applyIntroDebugUniforms() {
+    const settings = getIntroDebugUniformValues(this.introDebugSettings);
+    const materials = [
+      this.floor?.material ?? null,
+      ...this.mountains.map(({ mesh }) => mesh.material),
+      ...this.terrainChunks.map(({ mesh }) => mesh.material),
+      ...this.terrainPatches.map(({ mesh }) => mesh.material)
+    ].filter(Boolean);
+
+    materials.forEach((material) => {
+      const uniforms = material.uniforms ?? {};
+
+      if (uniforms.uRevealMaxDist) {
+        uniforms.uRevealMaxDist.value = settings.revealMaxDist;
+      }
+
+      if (uniforms.uRevealNoiseStrength) {
+        uniforms.uRevealNoiseStrength.value = settings.revealNoiseStrength;
+      }
+
+      if (uniforms.uRevealInnerWidth) {
+        uniforms.uRevealInnerWidth.value = settings.revealInnerWidth;
+      }
+
+      if (uniforms.uRevealOuterWidth) {
+        uniforms.uRevealOuterWidth.value = settings.revealOuterWidth;
+      }
+
+      if (uniforms.uTerrainShockwaveWidth) {
+        uniforms.uTerrainShockwaveWidth.value = settings.terrainShockwaveWidth;
+      }
+
+      if (uniforms.uTriangleShockwaveWidth) {
+        uniforms.uTriangleShockwaveWidth.value = settings.triangleShockwaveWidth;
+      }
+
+      if (uniforms.uFrostTint) {
+        uniforms.uFrostTint.value.copy(settings.frostTint);
+      }
+
+      if (uniforms.uFrostTintStrength) {
+        uniforms.uFrostTintStrength.value = settings.frostTintStrength;
+      }
+
+      if (uniforms.uMountainMaskStart) {
+        uniforms.uMountainMaskStart.value = settings.mountainMaskStart;
+      }
+
+      if (uniforms.uMountainMaskEnd) {
+        uniforms.uMountainMaskEnd.value = settings.mountainMaskEnd;
+      }
+    });
+  }
+
+  getIntroDebugSettings() {
+    return { ...this.introDebugSettings };
+  }
+
+  getIntroDebugDefaults() {
+    return { ...DEFAULT_IGLOO_INTRO_DEBUG_SETTINGS };
+  }
+
+  setIntroDebugSetting(key, value) {
+    if (!(key in this.introDebugSettings)) {
+      return;
+    }
+
+    const currentValue = this.introDebugSettings[key];
+
+    if (typeof currentValue === 'number') {
+      if (!Number.isFinite(value)) {
+        return;
+      }
+
+      this.introDebugSettings[key] = value;
+    } else if (typeof currentValue === 'string') {
+      if (typeof value !== 'string' || !value.trim()) {
+        return;
+      }
+
+      this.introDebugSettings[key] = value;
+    } else {
+      return;
+    }
+
+    this.applyIntroDebugUniforms();
+  }
+
+  resetIntroDebugSettings() {
+    this.introDebugSettings = { ...DEFAULT_IGLOO_INTRO_DEBUG_SETTINGS };
+    this.applyIntroDebugUniforms();
+  }
+
+  resetIglooPieceAnimationState() {
+    if (!this.iglooPieces.length || !this.iglooPieceOptionsData || !this.iglooPieceOptionsTexture) {
+      this.debugHoverMaxDisplacement = 0;
+      this.debugHoverAvgDisplacement = 0;
+      return;
+    }
+
+    this.iglooPieces.forEach((piece) => {
+      piece.targetDisplacement1 = 0;
+      piece.targetDisplacement2 = 0;
+      piece.targetBounce1 = 0;
+      piece.targetBounce2 = 0;
+      piece.displacement = 0;
+      piece.scrollDisplacement1 = 0;
+      piece.scrollDisplacement2 = 0;
+      piece.bounce = 0;
+
+      const baseIndex = piece.pieceIndex * 4;
+      this.iglooPieceOptionsData[baseIndex + 0] = 0;
+      this.iglooPieceOptionsData[baseIndex + 1] = 0;
+      this.iglooPieceOptionsData[baseIndex + 2] = 0;
+      this.iglooPieceOptionsData[baseIndex + 3] = piece.emission;
+    });
+
+    this.debugHoverMaxDisplacement = 0;
+    this.debugHoverAvgDisplacement = 0;
+    this.iglooPieceOptionsTexture.needsUpdate = true;
+  }
+
+  replayIntro() {
+    this.introElapsed = 0;
+    this.introProgress = 0;
+    this.introPlayed = false;
+    this.introRenderReady = false;
+    this.presentationState = this.computePresentationState(this.progress);
+    this.resetIglooPieceAnimationState();
   }
 
   computePresentationState(progress = this.progress) {
@@ -1548,7 +1859,7 @@ export class IglooScene extends SceneBase {
     const textProgress = ramp(introTime, 4.8, 1.25) * exitFade;
     const legalProgress = ramp(introTime, 4.65, 1.05) * exitFade;
     const introParticlesPresence = 1 - ramp(introTime, 0.5, 4.0);
-    const cameraProgress = ramp(introTime, 2.0, 5.5);
+    const cameraProgress = cubicBezierEase(clamp01((introTime - 2.0) / 5.5), 0.5, 0.0, 0.1, 1.0);
 
     return {
       panelProgress,
@@ -1568,7 +1879,8 @@ export class IglooScene extends SceneBase {
 
   getColorCorrectionState() {
     const whiteoutProgress = this.presentationState.whiteoutProgress ?? 0;
-    const bloomStrength = THREE.MathUtils.lerp(1.18, 0.9, this.introProgress)
+    const bloomStrength = THREE.MathUtils.lerp(0.92, 0.72, this.introProgress)
+      * Math.max(this.introDebugSettings.bloomStrengthScale, 0)
       * THREE.MathUtils.lerp(1, 0.9, whiteoutProgress);
     return {
       profile: 'igloo',
@@ -1740,19 +2052,20 @@ export class IglooScene extends SceneBase {
     const timelineWeight = smoothWindow(this.progress, 0.14, 1);
     const whiteoutProgress = smoothWindow(this.progress, 0.56, 0.9);
     const introTime = Math.min(this.introElapsed, this.introDuration);
-    const introCameraBlend = ramp(introTime, 2.0, 5.5);
-    const introTerrainProgress = ramp(introTime, 0.7, 6.8);
-    const introShellProgress = ramp(introTime, 1.0, 1.0);
-    const introMaterialize = ramp(introTime, 1.1, 2.25);
+    const introCameraBlend = cubicBezierEase(clamp01((introTime - 2.0) / 5.5), 0.5, 0.0, 0.1, 1.0);
+    const introTerrainProgress = cubicBezierEase(clamp01((introTime - 0.7) / 7.5), 0.5, 0.0, 0.1, 1.0);
+    const introTerrainProgress2 = cubicBezierEase(clamp01((introTime - 0.7) / 7.5), 0.6, 0.0, 0.0, 1.0);
+    const introShellProgress = timedEase(introTime, 1.0, 1.0, easePower2InOut);
+    const introMaterialize = cubicBezierEase(clamp01((introTime - 1.1) / 2.25), 0.662, 0.073, 0.047, 1.0);
     const introGroundAlpha = ramp(introTime, 1.15, 1.0);
-    const introSmokeAlpha = ramp(introTime, 2.0, 3.0);
-    const introSnowAlpha = ramp(introTime, 2.0, 4.0);
-    const introSkyProgress = ramp(introTime, 1.5, 3.0);
+    const introMountainAlpha = timedEase(introTime, 0.7, 3.0, easePower2InOut);
+    const introSmokeAlpha = timedEase(introTime, 2.0, 3.0, easePower2InOut);
+    const introSnowAlpha = timedEase(introTime, 2.0, 4.0, easePower2InOut);
+    const introSkyProgress = timedEase(introTime, 1.5, 3.0, easePower2InOut);
     const introOutlinePresence = fadeWindow(introTime, 0.0, 0.12, 2.0, 3.0);
     const introCagePresence = fadeWindow(introTime, 0.0, 0.1, 2.1, 3.0);
     const introFieldPresence = 0;
     const introParticlesAlpha = fadeWindow(introTime, 0.5, 0.6, 1.75, 2.0);
-    const secondaryTerrainAlpha = ramp(introTime, 2.0, 1.25);
 
     if (this.pointerActive) {
       this.pointerDriftTarget.copy(this.pointerNdc);
@@ -1832,16 +2145,18 @@ export class IglooScene extends SceneBase {
     this.dome.material.uniforms.uDisplacementMix.value = (1 - introMaterialize) * 0.6;
     this.dome.material.uniforms.uProgress.value = introShellProgress;
     this.dome.material.uniforms.uIntroMaterialize.value = introMaterialize;
-    this.dome.material.uniforms.uIntroGlow.value = THREE.MathUtils.lerp(1.2, 1, introMaterialize);
+    this.dome.material.uniforms.uIntroGlow.value = THREE.MathUtils.lerp(0.9, 0.66, introMaterialize)
+      * Math.max(this.introDebugSettings.iglooGlowStrength, 0);
     this.dome.material.uniforms.uHoverPoint.value.copy(this.hoverPoint);
     this.dome.material.uniforms.uHoverStrength.value = this.hoverStrength * sectionPresence;
     this.dome.material.uniforms.uHoverVelocity.value = this.hoverVelocity;
     this.dome.material.uniforms.uAlpha.value = sectionPresence;
     this.floor.material.uniforms.uMousePos.value.copy(this.pointerWorld);
     this.floor.material.uniforms.uProgress.value = introTerrainProgress;
-    this.floor.material.uniforms.uProgress2.value = introTerrainProgress;
+    this.floor.material.uniforms.uProgress2.value = introTerrainProgress2;
     this.floor.material.uniforms.uAlpha.value = sectionPresence * introGroundAlpha;
-    this.fillLight.intensity = THREE.MathUtils.lerp(4.5, 2.8, this.progress);
+    this.fillLight.intensity = THREE.MathUtils.lerp(3.4, 2.25, this.progress)
+      * Math.max(this.introDebugSettings.iglooGlowStrength, 0);
 
     if (this.outline) {
       this.outline.rotation.y = 0;
@@ -1892,13 +2207,13 @@ export class IglooScene extends SceneBase {
         basePosition.z
       );
       if (mesh.material.uniforms.uAlpha) {
-        mesh.material.uniforms.uAlpha.value = sectionPresence;
+        mesh.material.uniforms.uAlpha.value = sectionPresence * introMountainAlpha;
       }
       if (mesh.material.uniforms.uProgress) {
         mesh.material.uniforms.uProgress.value = introTerrainProgress;
       }
       if (mesh.material.uniforms.uProgress2) {
-        mesh.material.uniforms.uProgress2.value = introTerrainProgress;
+        mesh.material.uniforms.uProgress2.value = introTerrainProgress2;
       }
     });
 
@@ -1913,11 +2228,10 @@ export class IglooScene extends SceneBase {
         baseRotation.y,
         baseRotation.z
       );
-      mesh.material.uniforms.uOpacity.value = THREE.MathUtils.lerp(0.95, 0.8, this.progress) * sectionPresence;
+      mesh.material.uniforms.uAlpha.value = sectionPresence * introGroundAlpha;
       mesh.material.uniforms.uProgress.value = introTerrainProgress;
-      mesh.material.uniforms.uProgress2.value = introTerrainProgress;
+      mesh.material.uniforms.uProgress2.value = introTerrainProgress2;
       mesh.material.uniforms.uTriangleAlpha.value = 1;
-      mesh.material.uniforms.uTriangleStrength.value = THREE.MathUtils.lerp(0.04, 0.015, this.progress);
     });
 
     this.terrainPatches.forEach(({ mesh, basePosition, baseRotation }, index) => {
@@ -1931,11 +2245,10 @@ export class IglooScene extends SceneBase {
         baseRotation.y,
         baseRotation.z
       );
-      mesh.material.uniforms.uOpacity.value = THREE.MathUtils.lerp(0.88, 0.72, this.progress) * sectionPresence;
+      mesh.material.uniforms.uAlpha.value = sectionPresence * introGroundAlpha;
       mesh.material.uniforms.uProgress.value = introTerrainProgress;
-      mesh.material.uniforms.uProgress2.value = introTerrainProgress;
+      mesh.material.uniforms.uProgress2.value = introTerrainProgress2;
       mesh.material.uniforms.uTriangleAlpha.value = 1;
-      mesh.material.uniforms.uTriangleStrength.value = THREE.MathUtils.lerp(0.045, 0.018, this.progress);
     });
 
     this.smokeLayers.forEach(({ mesh, basePosition, baseScale }, index) => {

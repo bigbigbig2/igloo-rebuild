@@ -8,11 +8,14 @@ export class AudioDebugGui {
   constructor({ controller }) {
     this.controller = controller;
     this.audio = controller?.audio ?? null;
+    this.iglooScene = controller?.sections?.igloo ?? null;
     this.controllers = [];
 
     if (!this.audio) {
       return;
     }
+
+    const iglooDebugValues = this.iglooScene?.getIntroDebugSettings?.() ?? {};
 
     this.values = {
       unlocked: this.audio.unlocked,
@@ -42,7 +45,19 @@ export class AudioDebugGui {
       musicTargetMix: this.audio.metrics.musicTargetMix,
       musicCurrentMix: this.audio.metrics.musicCurrentMix,
       roomTargetMix: this.audio.metrics.roomTargetMix,
-      roomCurrentMix: this.audio.metrics.roomCurrentMix
+      roomCurrentMix: this.audio.metrics.roomCurrentMix,
+      terrainRevealMaxDist: iglooDebugValues.terrainRevealMaxDist ?? 32,
+      terrainRevealNoiseStrength: iglooDebugValues.terrainRevealNoiseStrength ?? 3.5,
+      terrainRevealInnerWidth: iglooDebugValues.terrainRevealInnerWidth ?? 3.5,
+      terrainRevealOuterWidth: iglooDebugValues.terrainRevealOuterWidth ?? 2.5,
+      terrainShockwaveWidth: iglooDebugValues.terrainShockwaveWidth ?? 0.1,
+      triangleShockwaveWidth: iglooDebugValues.triangleShockwaveWidth ?? 0.1,
+      iglooGlowStrength: iglooDebugValues.iglooGlowStrength ?? 0.4,
+      bloomStrengthScale: iglooDebugValues.bloomStrengthScale ?? 0.3,
+      frostTint: iglooDebugValues.frostTint ?? '#e0ebff',
+      frostTintStrength: iglooDebugValues.frostTintStrength ?? 2,
+      mountainMaskStart: iglooDebugValues.mountainMaskStart ?? 32,
+      mountainMaskEnd: iglooDebugValues.mountainMaskEnd ?? 36
     };
     this.actions = {
       unlock: () => {
@@ -59,6 +74,14 @@ export class AudioDebugGui {
       },
       resetDefaults: () => {
         this.audio.resetDefaults();
+      },
+      replayIglooIntro: () => {
+        this.controller?.replayIglooIntro?.();
+      },
+      resetIglooIntroDebug: () => {
+        this.iglooScene?.resetIntroDebugSettings?.();
+        this.syncValuesFromIglooScene();
+        this.refresh();
       }
     };
 
@@ -74,13 +97,16 @@ export class AudioDebugGui {
     this.buildLoopFolder();
     this.buildOneShotFolder();
     this.buildDebugFolder();
+    this.buildIglooIntroFolder();
 
     this.unsubscribe = this.audio.onChange(() => {
       this.syncValuesFromAudio();
+      this.syncValuesFromIglooScene();
       this.refresh();
     });
 
     this.syncValuesFromAudio();
+    this.syncValuesFromIglooScene();
     this.refresh();
   }
 
@@ -97,6 +123,12 @@ export class AudioDebugGui {
       controller.step(step);
     }
 
+    this.controllers.push(controller);
+    return controller;
+  }
+
+  addColorController(folder, object, key) {
+    const controller = folder.addColor(object, key);
     this.controllers.push(controller);
     return controller;
   }
@@ -186,6 +218,52 @@ export class AudioDebugGui {
     this.addController(folder, this.values, 'roomCurrentMix', 0, 1, 0.001).name('Room current').listen();
   }
 
+  buildIglooIntroFolder() {
+    if (!this.iglooScene) {
+      return;
+    }
+
+    const folder = this.gui.addFolder('Igloo Intro');
+    this.addController(folder, this.actions, 'replayIglooIntro').name('Replay intro');
+    this.addController(folder, this.values, 'iglooGlowStrength', 0, 2.5, 0.01).name('Igloo glow').onChange((value) => {
+      this.iglooScene?.setIntroDebugSetting?.('iglooGlowStrength', value);
+    });
+    this.addController(folder, this.values, 'bloomStrengthScale', 0, 2.5, 0.01).name('Bloom gain').onChange((value) => {
+      this.iglooScene?.setIntroDebugSetting?.('bloomStrengthScale', value);
+    });
+    this.addColorController(folder, this.values, 'frostTint').name('Frost tint').onChange((value) => {
+      this.iglooScene?.setIntroDebugSetting?.('frostTint', value);
+    });
+    this.addController(folder, this.values, 'frostTintStrength', 0, 2.5, 0.01).name('Frost strength').onChange((value) => {
+      this.iglooScene?.setIntroDebugSetting?.('frostTintStrength', value);
+    });
+    this.addController(folder, this.values, 'terrainRevealMaxDist', 8, 80, 0.1).name('Reveal max').onChange((value) => {
+      this.iglooScene?.setIntroDebugSetting?.('terrainRevealMaxDist', value);
+    });
+    this.addController(folder, this.values, 'terrainRevealNoiseStrength', 0, 12, 0.01).name('Noise strength').onChange((value) => {
+      this.iglooScene?.setIntroDebugSetting?.('terrainRevealNoiseStrength', value);
+    });
+    this.addController(folder, this.values, 'terrainRevealInnerWidth', 0.1, 16, 0.01).name('Inner width').onChange((value) => {
+      this.iglooScene?.setIntroDebugSetting?.('terrainRevealInnerWidth', value);
+    });
+    this.addController(folder, this.values, 'terrainRevealOuterWidth', 0.1, 16, 0.01).name('Outer width').onChange((value) => {
+      this.iglooScene?.setIntroDebugSetting?.('terrainRevealOuterWidth', value);
+    });
+    this.addController(folder, this.values, 'terrainShockwaveWidth', 0.01, 3, 0.01).name('Terrain wave').onChange((value) => {
+      this.iglooScene?.setIntroDebugSetting?.('terrainShockwaveWidth', value);
+    });
+    this.addController(folder, this.values, 'triangleShockwaveWidth', 0.01, 3, 0.01).name('Triangle wave').onChange((value) => {
+      this.iglooScene?.setIntroDebugSetting?.('triangleShockwaveWidth', value);
+    });
+    this.addController(folder, this.values, 'mountainMaskStart', 0, 80, 0.1).name('Mask start').onChange((value) => {
+      this.iglooScene?.setIntroDebugSetting?.('mountainMaskStart', value);
+    });
+    this.addController(folder, this.values, 'mountainMaskEnd', 0, 96, 0.1).name('Mask end').onChange((value) => {
+      this.iglooScene?.setIntroDebugSetting?.('mountainMaskEnd', value);
+    });
+    this.addController(folder, this.actions, 'resetIglooIntroDebug').name('Reset intro params');
+  }
+
   syncValuesFromAudio() {
     this.values.unlocked = this.audio.unlocked;
     this.values.muted = this.audio.muted;
@@ -215,6 +293,27 @@ export class AudioDebugGui {
     this.values.musicCurrentMix = clamp01(this.audio.metrics.musicCurrentMix);
     this.values.roomTargetMix = clamp01(this.audio.metrics.roomTargetMix);
     this.values.roomCurrentMix = clamp01(this.audio.metrics.roomCurrentMix);
+  }
+
+  syncValuesFromIglooScene() {
+    const settings = this.iglooScene?.getIntroDebugSettings?.();
+
+    if (!settings) {
+      return;
+    }
+
+    this.values.terrainRevealMaxDist = settings.terrainRevealMaxDist;
+    this.values.terrainRevealNoiseStrength = settings.terrainRevealNoiseStrength;
+    this.values.terrainRevealInnerWidth = settings.terrainRevealInnerWidth;
+    this.values.terrainRevealOuterWidth = settings.terrainRevealOuterWidth;
+    this.values.terrainShockwaveWidth = settings.terrainShockwaveWidth;
+    this.values.triangleShockwaveWidth = settings.triangleShockwaveWidth;
+    this.values.iglooGlowStrength = settings.iglooGlowStrength;
+    this.values.bloomStrengthScale = settings.bloomStrengthScale;
+    this.values.frostTint = settings.frostTint;
+    this.values.frostTintStrength = settings.frostTintStrength;
+    this.values.mountainMaskStart = settings.mountainMaskStart;
+    this.values.mountainMaskEnd = settings.mountainMaskEnd;
   }
 
   refresh() {

@@ -139,6 +139,28 @@ export class MainController {
     this.audio?.toggleMute();
   }
 
+  replayIglooIntro() {
+    if (!this.ready) {
+      return;
+    }
+
+    const iglooScrollStart = this.homeSceneStack.getScrollStartForKey('igloo');
+    const runReplay = () => {
+      this.scrollState.jumpTo(iglooScrollStart);
+      this.syncHomeScene();
+      this.sections.igloo?.replayIntro?.();
+      this.syncUi();
+    };
+
+    if (this.route.name !== 'home') {
+      this.routeSync.goHome();
+      requestAnimationFrame(runReplay);
+      return;
+    }
+
+    runReplay();
+  }
+
   openProject(hash) {
     const cubesScrollStart = this.homeSceneStack.getScrollStartForKey('cubes');
     this.audio?.play('click-project');
