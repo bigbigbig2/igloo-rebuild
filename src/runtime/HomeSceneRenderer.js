@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 
 const COMPOSITE_VERTEX_SHADER = /* glsl */ `
   varying vec2 vUv;
@@ -478,6 +479,8 @@ export class HomeSceneRenderer {
     this.renderTargetPostA = createRenderTarget(1, 1);
     this.renderTargetPostB = createRenderTarget(1, 1);
     this.renderTargetPostEntry = createRenderTarget(1, 1);
+    this.renderTargetComposite = createRenderTarget(1, 1);
+    this.bloomPass = new UnrealBloomPass(new THREE.Vector2(1, 1), 1, 0.35, 0.8);
   }
 
   setActive(active) {
@@ -515,6 +518,8 @@ export class HomeSceneRenderer {
     this.renderTargetPostA.setSize(renderWidth, renderHeight);
     this.renderTargetPostB.setSize(renderWidth, renderHeight);
     this.renderTargetPostEntry.setSize(renderWidth, renderHeight);
+    this.renderTargetComposite.setSize(renderWidth, renderHeight);
+    this.bloomPass.setSize(renderWidth, renderHeight);
     this.compositeMaterial.uniforms.uResolution.value.set(renderWidth, renderHeight);
     this.entryPostMaterial.uniforms.uResolution.value.set(renderWidth, renderHeight);
 
@@ -556,6 +561,22 @@ export class HomeSceneRenderer {
     renderer.clear(true, true, true);
     renderer.render(this.lutScene, this.lutCamera);
     return destinationTarget.texture;
+  }
+
+  applyBloom(renderer, sourceTarget, destinationTarget, bloomState) {
+    const strength = bloomState?.bloomStrength ?? 0;
+
+    if (strength <= 0.001) {
+      return false;
+    }
+
+    this.bloomPass.threshold = bloomState?.bloomThreshold ?? 0.8;
+    this.bloomPass.strength = strength;
+    this.bloomPass.radius = bloomState?.bloomRadius ?? 0.35;
+    this.bloomPass.renderToScreen = destinationTarget == null;
+    this.bloomPass.render(renderer, destinationTarget, sourceTarget, 0, false);
+    renderer.setRenderTarget(destinationTarget ?? null);
+    return true;
   }
 
   update(delta, elapsed, frameState) {
@@ -630,17 +651,19 @@ export class HomeSceneRenderer {
     renderer.clear(true, true, true);
     renderer.render(cubesScene ?? currentScene, (cubesScene ?? currentScene).camera);
 
+    const currentColorState = getColorCorrectionState(currentScene);
+    const nextColorState = getColorCorrectionState(nextScene ?? currentScene);
     const sceneATexture = this.applyColorCorrection(
       renderer,
       this.renderTargetA,
       this.renderTargetPostA,
-      getColorCorrectionState(currentScene)
+      currentColorState
     );
     const sceneBTexture = this.applyColorCorrection(
       renderer,
       this.renderTargetB,
       this.renderTargetPostB,
-      getColorCorrectionState(nextScene ?? currentScene)
+      nextColorState
     );
 
     this.compositeMaterial.uniforms.tSceneA.value = sceneATexture;
@@ -658,9 +681,18 @@ export class HomeSceneRenderer {
     );
     this.compositeMaterial.uniforms.uBlueOffset.value.copy(this.blueOffset);
 
-    renderer.setRenderTarget(previousTarget);
-    renderer.clear(true, true, true);
-    renderer.render(this.compositeScene, this.compositeCamera);
+    const bloomState = blend > 0.5 ? nextColorState : currentColorState;
+
+    if ((bloomState?.bloomStrength ?? 0) > 0.001) {
+      renderer.setRenderTarget(this.renderTargetComposite);
+      renderer.clear(true, true, true);
+      renderer.render(this.compositeScene, this.compositeCamera);
+      this.applyBloom(renderer, this.renderTargetComposite, previousTarget, bloomState);
+    } else {
+      renderer.setRenderTarget(previousTarget);
+      renderer.clear(true, true, true);
+      renderer.render(this.compositeScene, this.compositeCamera);
+    }
 
     if (this.overlayScene?.scene && this.overlayScene?.camera) {
       const previousAutoClear = renderer.autoClear;
@@ -679,12 +711,14 @@ export class HomeSceneRenderer {
     this.renderTargetPostA.dispose();
     this.renderTargetPostB.dispose();
     this.renderTargetPostEntry.dispose();
+    this.renderTargetComposite.dispose();
     this.compositeQuad.geometry.dispose();
     this.compositeMaterial.dispose();
     this.lutQuad.geometry.dispose();
     this.lutMaterial.dispose();
     this.entryPostQuad.geometry.dispose();
     this.entryPostMaterial.dispose();
+    this.bloomPass.dispose();
     this.overlayScene?.dispose?.();
   }
 }

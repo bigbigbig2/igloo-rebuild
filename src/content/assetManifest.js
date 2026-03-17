@@ -1,6 +1,28 @@
 export const assetManifest = {
   geometry: [
-    { section: 'igloo', key: 'igloo-shell', source: '/reference-assets/geometries/igloo.drc' },
+    {
+      section: 'igloo',
+      key: 'igloo-shell',
+      source: '/reference-assets/geometries/igloo.drc',
+      dracoAttributes: {
+        position: 0,
+        normal: 1,
+        uv: 2,
+        centr: 3,
+        rand: 4,
+        emission: 5,
+        batchId: 6
+      },
+      dracoAttributeTypes: {
+        position: 'Float32Array',
+        normal: 'Float32Array',
+        uv: 'Float32Array',
+        centr: 'Float32Array',
+        rand: 'Float32Array',
+        emission: 'Float32Array',
+        batchId: 'Int32Array'
+      }
+    },
     { section: 'igloo', key: 'igloo-outline', source: '/reference-assets/geometries/igloo/igloo_outline.drc' },
     { section: 'igloo', key: 'igloo-cage', source: '/reference-assets/geometries/igloo/igloo_cage.drc' },
     { section: 'igloo', key: 'mountain', source: '/reference-assets/geometries/mountain.drc' },

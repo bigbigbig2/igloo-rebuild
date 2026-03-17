@@ -13,6 +13,14 @@ function loadWithLoader(loader, source) {
   });
 }
 
+function loadArrayBuffer(loadingManager, source) {
+  return new Promise((resolve, reject) => {
+    const loader = new THREE.FileLoader(loadingManager);
+    loader.setResponseType('arraybuffer');
+    loader.load(source, resolve, undefined, reject);
+  });
+}
+
 export class AssetRegistry {
   constructor(manifest, { bus } = {}) {
     this.manifest = manifest;
@@ -159,6 +167,21 @@ export class AssetRegistry {
   }
 
   async loadGeometry(entry) {
+    if (entry.dracoAttributes) {
+      const buffer = await loadArrayBuffer(this.loadingManager, entry.source);
+
+      return new Promise((resolve, reject) => {
+        this.dracoLoader.decodeDracoFile(
+          buffer,
+          resolve,
+          entry.dracoAttributes,
+          entry.dracoAttributeTypes,
+          THREE.SRGBColorSpace,
+          reject
+        );
+      });
+    }
+
     return loadWithLoader(this.dracoLoader, entry.source);
   }
 
