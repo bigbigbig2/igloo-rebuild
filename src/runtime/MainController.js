@@ -421,6 +421,7 @@ export class MainController {
     // - CubesScene 用它做射线拾取和 hover project
     const pointer = this.getNormalizedPointer(event);
     this.sections.igloo?.setPointer(pointer);
+    this.sections.cubes?.setPointer(pointer);
     const hit = this.pickProjectHitFromEvent(event);
     this.sections.cubes?.setPointerHit(hit);
     this.setHoveredProject(hit?.project ?? null);
@@ -428,6 +429,7 @@ export class MainController {
 
   onPointerLeave() {
     this.sections.igloo?.setPointer(null);
+    this.sections.cubes?.setPointer(null);
     this.sections.cubes?.setPointerHit(null);
     this.setHoveredProject(null);
   }

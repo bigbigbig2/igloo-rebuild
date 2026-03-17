@@ -1566,6 +1566,7 @@ export class IglooScene extends SceneBase {
       this.root.add(this.outline);
     }
 
+    // 线框笼罩层，主要用来在开场时配合 materialize 效果营造碎片悬浮的感觉，后续也会在 hover 时有细微的亮度变化。
     if (iglooCageGeometry) {
       this.cage = new THREE.Mesh(
         iglooCageGeometry,

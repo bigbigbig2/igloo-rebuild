@@ -318,25 +318,36 @@ src/main.js
 
 ### 7.1 为什么不是直接 render 当前 scene
 
-首页不是“滚到哪就切到哪个场景”，而是一个带有过渡合成的 section stack。
+首页不是“滚到哪就只 render 哪个 scene”，而是一条连续 section 轴上的多场景编排。
+当前屏幕画面通常同时依赖：
 
-所以实际渲染不是：
+- 当前 section 的主场景
+- 下一个 section 的候选场景
+- `cubes` 作为 detail handoff 的桥接场景
+- `detail` 作为首页上的叠层场景
+- `WebGLUiScene` 作为最终 HUD overlay
+
+所以真实结构不是：
 
 ```text
 currentScene -> screen
 ```
 
-而是更接近：
+而更接近：
 
 ```text
-sceneA/current
-sceneB/next
-detailScene
-cubesScene
-overlayScene(WebGL UI)
-  -> post / composite / bloom
+currentScene -> RT_A
+nextScene    -> RT_B
+detailScene  -> RT_Detail
+cubesScene   -> RT_Cubes
+  -> color correction / entry post
+  -> fullscreen composite shader
+  -> optional bloom
+  -> overlay WebGL UI
   -> screen
 ```
+
+它本质上是一个“小型渲染管线”，而不只是“场景切换器”。
 
 ### 7.2 HomeSceneRenderer 的职责
 
@@ -357,20 +368,203 @@ overlayScene(WebGL UI)
 - scene 关心自己怎么动
 - renderer 关心多个 scene 怎么合到一张图上
 
+进一步说，`HomeSceneRenderer` 其实承担了 render graph 执行器的职责。它内部常驻了三类 fullscreen pass：
+
+- `composite pass`
+  - 负责首页 section 过渡和 detail overlay 的最终合成
+- `LUT pass`
+  - 专门给 `IglooScene` 做 3D LUT 颜色校正和渐变压暗
+- `entry post pass`
+  - 专门给 `EntryScene` 做 portal 风格的扭曲和染色
+
+另外还有一个 `UnrealBloomPass`，只在当前 section 声明了 bloom 参数时才会参与。
+
 ### 7.3 典型渲染流程
 
-单帧渲染过程大致如下：
+如果从 `Engine` 开始看，这条调用链实际上是：
 
-1. `MainController` 根据滚动与路由计算 `renderState`
-2. `HomeSceneRenderer.update()` 更新当前 scene、next scene、detail scene 和 cubes scene
-3. `prepareForRender()` 允许某些 scene 先做离屏准备
-4. 分别把多个 scene 渲染到不同 render target
-5. 对当前或下一 scene 应用颜色校正
-6. 在 composite shader 中根据 `blend`、`detailProgress`、蓝噪声、scroll data、frost data 做全屏合成
-7. 按需要做 bloom
-8. 最后叠加 WebGL UI
+```text
+Engine.loop()
+  -> bus.emit('tick')
+  -> MainController.onTick()
+       -> ScrollState.step()
+       -> DetailTransitionState.step()
+       -> 更新 detail anchor / cubes focus / UI / audio
+       -> syncHomeScene()
+  -> HomeSceneRenderer.update()
+  -> HomeSceneRenderer.render()
+```
 
-这套结构是当前工程最核心的“运行时价值”之一，因为它把原始 bundle 中纠缠在一起的 section 合成逻辑拆成了可维护模块。
+这里有一个容易误解的点：`Engine` 当前持有的 `view` 不是某个具体首页 scene，而是 `MainController.syncHomeScene()` 里注入的 `HomeSceneRenderer`。因此，真正决定“这一帧怎么画”的不是某个 scene，而是 `HomeSceneRenderer`。
+
+### 7.4 RenderTarget 分工
+
+`HomeSceneRenderer` 当前维护的离屏目标并不是重复缓存，而是各自承担不同角色：
+
+- `renderTargetA`
+  - 当前首页主场景的原始渲染结果
+- `renderTargetB`
+  - 下一首页场景的原始渲染结果
+- `renderTargetDetail`
+  - `DetailScene` 的离屏结果
+- `renderTargetCubes`
+  - `CubesScene` 的离屏结果
+  - 即使当前 section 不是 `cubes`，detail 过渡时依然可能需要它
+- `renderTargetPostA`
+  - `renderTargetA` 经 color correction 或 entry post 之后的结果
+- `renderTargetPostB`
+  - `renderTargetB` 经 color correction 或 entry post 之后的结果
+- `renderTargetComposite`
+  - fullscreen composite 之后、进入 bloom 之前的中间结果
+
+此外代码里还预先分配了 `renderTargetPostEntry`。它目前更像一个预留位，主路径实际使用的是 `renderTargetPostA / renderTargetPostB` 作为场景级后处理输出。
+
+### 7.5 单帧渲染的真实顺序
+
+一帧首页渲染大致可以拆成下面 9 步：
+
+1. `MainController.onTick()` 先推进运行时状态。
+   - 首页模式下更新 `ScrollState`
+   - 更新 `DetailTransitionState`
+   - 从 `CubesScene.getDetailAnchor()` 取当前项目的 handoff anchor
+   - 把 anchor 和 detail 进度写入 `DetailScene`
+   - 重新计算首页 section 状态，并把结果注入 `HomeSceneRenderer`
+
+2. `HomeSceneRenderer.update()` 更新本帧会参与的 scene。
+   - 永远更新当前首页 scene
+   - 只有进入 section 混合区时才更新 `nextScene`
+   - 只有 detail 打开时才更新 `detailScene`
+   - `cubesScene` 在它不是 current/next 时也会额外补一次更新
+   - 最后调用 `WebGLUiScene.animate()` 刷新 HUD 动画
+
+3. 渲染前准备阶段。
+   - `prepareSceneForRender()` 会尝试调用各 scene 的 `prepareForRender()`
+   - 这样某些 scene 可以在正式 render 前先完成额外离屏准备
+
+4. 分别把各 scene 画进自己的离屏目标。
+
+```text
+currentScene -> renderTargetA
+nextScene    -> renderTargetB
+detailScene  -> renderTargetDetail
+cubesScene   -> renderTargetCubes
+```
+
+5. 对 `A/B` 两张首页主纹理做场景级后处理。
+   - `IglooScene` 走 3D LUT color correction
+   - `EntryScene` 走 portal 风格 post shader
+   - 没声明 profile 的 scene 直接使用原始纹理
+
+6. 把 `sceneA / sceneB / detail / cubes` 一起喂给 fullscreen composite shader。
+   - `uMix` 控制 current/next 的 section 混合
+   - `uProgressVel` 把滚动速度送进 shader，让过渡有速度感
+   - `uDetailProgress` 控制 cubes 到 detail 的 overlay 混合
+   - `uDetailProgress2` 控制 detail 场景自身的后半段收束
+
+7. 如果当前主导画面声明了 bloom，就先把 composite 结果写进 `renderTargetComposite`，再执行 `UnrealBloomPass`。
+   - 这里的“主导画面”并不固定是 current scene
+   - 当 `blend > 0.5` 时，renderer 会优先采用 next scene 的 bloom 配置
+
+8. 如果没有 bloom，就直接把 composite 结果输出到当前目标，通常就是屏幕。
+
+9. 最后叠加 `WebGLUiScene`。
+   - 这里会临时关闭 `autoClear`
+   - 只 `clearDepth()`，不清颜色
+   - 这样 HUD 才能盖在已经合成完成的画面上
+
+### 7.6 Scene 级 hook 如何插入管线
+
+这个工程并不是所有 scene 都“update 一下然后直接 render”。为了让 scene 实现和渲染管线解耦，`HomeSceneRenderer` 给场景留了几个明确插口。
+
+第一类是 `prepareForRender()`。
+
+- `CubesScene.prepareForRender()`
+  - 会先更新交互效果，再做 transmission capture
+  - 具体做法是临时切换到 transmission capture 状态，把自己额外渲染到内部 `transmissionTarget`
+  - 然后再把这张纹理写回透射材质 uniform，供正式渲染时使用
+- `IglooScene.prepareForRender()`
+  - 会在正式 render 前同步依赖分辨率的 shader uniform
+  - 这类 uniform 直接依赖离屏尺寸，所以必须等这一帧的实际 render size 确定之后再写
+
+第二类是 `getColorCorrectionState()`。
+
+- `IglooScene` 会返回：
+  - `profile: 'igloo'`
+  - `gradientAlpha`
+  - `lutIntensity`
+  - `bloomStrength / bloomRadius / bloomThreshold`
+- `EntryScene` 会返回：
+  - `profile: 'entry'`
+  - `ringProximity`
+  - `squareAttr`
+
+这意味着 scene 不需要知道“后处理怎么写”，它只需要声明“renderer 这一帧应该如何处理我”。
+
+### 7.7 Composite Shader 在做什么
+
+`HomeSceneRenderer` 里最核心的是 `COMPOSITE_FRAGMENT_SHADER`。它并不是简单地 `mix(sceneA, sceneB, blend)`，而是把首页 section 过渡和 detail 过渡合并成了一个统一全屏 pass。
+
+它内部有两个主要阶段：
+
+- `renderHomeTransition()`
+  - 使用 `tScroll` 提供的滚动数据纹理生成对角切割、技术噪声位移和边界模糊
+  - 使用 `tBlue` 蓝噪声做每帧采样扰动
+  - 对 `sceneA / sceneB` 都做 chromatic aberration，再按 cut mask 混合
+- `renderDetailTransition()`
+  - 以 `tCubes` 作为首页侧输入，以 `tDetail` 作为详情侧输入
+  - 通过 `tFrost` 和 `tScroll` 生成冰裂/技术位移
+  - 用 `uDetailProgress` 和 `uDetailProgress2` 控制“从 cubes 脱离”和“detail 自身收束”两个阶段
+
+`uUseDetail` 大于 0 时，最终颜色会优先走 detail 过渡分支；否则只走首页 section 过渡分支。
+
+所以 detail 在视觉上并不是“突然盖一层上来”，而是通过 compositor 在同一张全屏图里连续接过去的。
+
+### 7.8 detail 为什么要单独渲染一张图
+
+`DetailScene` 没有直接成为 `Engine.view`，而是一直作为首页渲染器里的 overlay source 存在。
+
+这样做有几个好处：
+
+- 首页 section 的滚动状态不需要被打断
+- `CubesScene -> DetailScene` 可以做真正的视觉 handoff，而不是硬切页
+- detail 打开时依然能复用首页的 post/composite/bloom 结构
+- 返回首页时只需要反向推动 `DetailTransitionState`，不需要重建整个渲染世界
+
+这也是为什么 `MainController.onRouteChange()` 进入项目详情时，会先把首页滚动强制对齐到 `cubes` section，再去 `detailTransition.open()`。
+
+### 7.9 为什么 WebGL UI 要最后叠加
+
+`WebGLUiScene` 本质上是屏幕空间 HUD，而不是参与 section 合成的 3D 场景。
+
+它放在最后叠加有三个原因：
+
+- 避免被首页 transition shader 一起扭曲
+- 避免被 bloom 和 LUT 误处理
+- 让 logo、文字、框线始终保持独立可控的清晰度
+
+因此当前管线的最终顺序可以概括成一句话：
+
+> 先分别画 scene，再分别做场景级后处理，再做首页/详情的全屏合成，再按需加 bloom，最后才叠 HUD。
+
+### 7.10 这套管线的设计价值
+
+从工程角度看，这套渲染管线最重要的价值不只是“效果接近原站”，而是它把复杂度拆到了正确位置：
+
+- `MainController`
+  - 管应用状态，不碰具体 shader
+- `Scene`
+  - 管自己这一段的几何、材质和动画，不负责多场景合成
+- `HomeSceneRenderer`
+  - 管离屏目标、后处理和最终输出，不侵入 scene 内部状态机
+
+因此以后无论是：
+
+- 新增一个 section
+- 替换某个 scene 的 shader
+- 重写 detail 过渡
+- 继续强化 WebGL HUD
+
+都不必把所有逻辑重新揉回一个超级大类里。这正是当前工程比原始 dump 更可维护的地方。
 
 ## 8. 内容层与数据流
 

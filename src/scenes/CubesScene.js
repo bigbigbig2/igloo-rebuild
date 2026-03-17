@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { CubePlexus } from '../effects/CubePlexus.js';
 import { MouseFrostMap } from '../effects/MouseFrostMap.js';
 import { CubeTransmissionMaterial } from '../materials/CubeTransmissionMaterial.js';
 import { prepareGeometry } from '../utils/geometry.js';
@@ -693,6 +694,7 @@ export class CubesScene extends SceneBase {
     this.innerObjects = [];
     this.smokeMeshes = [];
     this.smokeMaterials = [];
+    this.plexusSystems = [];
     this.cubeBaseStates = [];
     this.transmissionMaterials = [];
     this.frostMaps = [];
@@ -726,10 +728,17 @@ export class CubesScene extends SceneBase {
     this.windNoise = assets.get('texture', 'wind-noise') ?? this.blueNoise;
     this.trianglesTexture = assets.get('texture', 'triangles-tiling') ?? null;
     this.baseCameraPosition = new THREE.Vector3(0, 0, 5);
+    this.baseCameraFov = this.camera.fov;
     this.transmissionTarget = createTransmissionTarget();
     this.transmissionState = {
       capturing: false
     };
+    this.pointerTarget = new THREE.Vector2();
+    this.pointerCurrent = new THREE.Vector2();
+    this.pointerTargetStrength = 0;
+    this.pointerStrength = 0;
+    this.scrollVelocity = 0;
+    this.lastProgress = this.progress;
     this.blueOffset = new THREE.Vector2();
     this.parentWorldQuaternion = new THREE.Quaternion();
     this.cameraWorldQuaternion = new THREE.Quaternion();
@@ -858,6 +867,70 @@ export class CubesScene extends SceneBase {
     // - 内层对象
     // - 配套烟雾平面
     // - 一张独立的鼠标霜冻贴图
+    this.roomRing = new THREE.Mesh(
+      new THREE.TorusGeometry(1.55, 0.045, 24, 120),
+      createRoomRingMaterial()
+    );
+    this.roomRing.name = 'cubes-room-ring';
+    this.roomRing.rotation.x = Math.PI * 0.5;
+    this.roomRing.renderOrder = 7;
+    this.roomRing.visible = false;
+    this.add(this.roomRing);
+
+    this.forcefield = new THREE.Mesh(
+      new THREE.IcosahedronGeometry(1.38, 4),
+      createForcefieldMaterial(this.trianglesTexture)
+    );
+    this.forcefield.name = 'cubes-forcefield';
+    this.forcefield.renderOrder = 6;
+    this.forcefield.visible = false;
+    this.forcefield.scale.set(1.25, 0.86, 1.25);
+    this.add(this.forcefield);
+
+    const textCylinderGeometry = new THREE.CylinderGeometry(1.9, 1.9, 3.65, 80, 1, true);
+    const textCylinderConfigs = [
+      {
+        opacityScale: 0.18,
+        heightFade: 1,
+        pulseScale: 2.4,
+        speed: 2.15,
+        radialStart: 3.2,
+        radialEnd: 1.2,
+        position: new THREE.Vector3(0, -0.15, 0),
+        scale: new THREE.Vector3(1.08, 1, 1.08),
+        rotationY: 0
+      },
+      {
+        opacityScale: 0.11,
+        heightFade: 0,
+        pulseScale: 4.5,
+        speed: 1.65,
+        radialStart: 4.1,
+        radialEnd: 1.95,
+        position: new THREE.Vector3(0, 0.18, 0),
+        scale: new THREE.Vector3(1.34, 1.18, 1.34),
+        rotationY: Math.PI * 0.24
+      }
+    ];
+
+    textCylinderConfigs.forEach((config, index) => {
+      const mesh = new THREE.Mesh(
+        textCylinderGeometry.clone(),
+        createTextCylinderMaterial(
+          assets.get('texture', 'blurrytext-atlas') ?? null,
+          config
+        )
+      );
+      mesh.name = `cubes-text-cylinder-${index}`;
+      mesh.renderOrder = 8 + index;
+      mesh.visible = false;
+      mesh.position.copy(config.position);
+      mesh.scale.copy(config.scale);
+      mesh.rotation.y = config.rotationY;
+      this.textCylinders.push(mesh);
+      this.add(mesh);
+    });
+
     projects.forEach((project, index) => {
       const assetConfig = getCubeAssetConfig(project);
       const innerAssetConfig = getInnerObjectAssetConfig(project);
@@ -865,6 +938,7 @@ export class CubesScene extends SceneBase {
       const geometry = prepareGeometry(assets.get('geometry', assetConfig.geometryKey), {
         size: 1.6
       }) || new THREE.BoxGeometry(1.35, 1.35, 1.35);
+      geometry.computeBoundingSphere?.();
       const innerGeometry = prepareGeometry(assets.get('geometry', innerAssetConfig.geometryKey), {
         size: 0.72 * innerAssetConfig.scale
       }) || new THREE.IcosahedronGeometry(0.35, 2);
@@ -915,10 +989,15 @@ export class CubesScene extends SceneBase {
       smokeMesh.renderOrder = 15;
       smokeMesh.frustumCulled = false;
       smokeMesh.position.y = -0.35;
+      const plexus = new CubePlexus({
+        color: project.accent,
+        radius: geometry.boundingSphere?.radius ?? 0.82
+      });
+      plexus.group.position.y = -0.02;
 
       cubeGroup.position.y = -(index + 1) * this.verticalOffset;
       cubeGroup.name = `cube-group-${index}`;
-      cubeGroup.add(cubeMesh, innerMesh, smokeMesh);
+      cubeGroup.add(cubeMesh, innerMesh, smokeMesh, plexus.group);
 
       this.projectGroup.add(cubeGroup);
       this.cubeGroups.push(cubeGroup);
@@ -926,6 +1005,7 @@ export class CubesScene extends SceneBase {
       this.innerObjects.push(innerMesh);
       this.smokeMeshes.push(smokeMesh);
       this.smokeMaterials.push(smokeMaterial);
+      this.plexusSystems.push(plexus);
       this.frostMaps.push(mouseFrost);
       this.transmissionMaterials.push(material);
       this.cubeBaseStates.push({
@@ -1005,6 +1085,9 @@ export class CubesScene extends SceneBase {
     this.smokeMeshes.forEach((smokeMesh) => {
       smokeMesh.visible = !capturing;
     });
+    this.plexusSystems.forEach((plexus) => {
+      plexus.setVisible(!capturing);
+    });
 
     if (this.backgroundShapes) {
       this.backgroundShapes.visible = !capturing && this.backgroundShapesEnabled && this.backgroundShapesVisible;
@@ -1079,6 +1162,39 @@ export class CubesScene extends SceneBase {
   setHoveredProject(projectHash = null) {
     this.hoveredProjectHash = projectHash;
     this.hoveredProjectIndex = this.projects.findIndex((project) => project.hash === projectHash);
+  }
+
+  setDetailFocus(projectHash = null, progress = 0) {
+    this.detailFocusHash = projectHash;
+    this.detailFocusProgress = THREE.MathUtils.clamp(progress, 0, 1);
+    const nextIndex = this.projects.findIndex((project) => project.hash === projectHash);
+
+    if (nextIndex >= 0 && nextIndex !== this.detailFocusIndex && this.detailFocusProgress > 0.02) {
+      this.plexusSystems[nextIndex]?.triggerPulse(1);
+    }
+
+    this.detailFocusIndex = nextIndex;
+  }
+
+  setHoveredProject(projectHash = null) {
+    const previousIndex = this.hoveredProjectIndex;
+    this.hoveredProjectHash = projectHash;
+    this.hoveredProjectIndex = this.projects.findIndex((project) => project.hash === projectHash);
+
+    if (this.hoveredProjectIndex >= 0 && this.hoveredProjectIndex !== previousIndex) {
+      this.plexusSystems[this.hoveredProjectIndex]?.triggerPulse(0.85);
+    }
+  }
+
+  setPointer(pointer = null) {
+    if (pointer && Number.isFinite(pointer.x) && Number.isFinite(pointer.y)) {
+      this.pointerTarget.set(pointer.x, pointer.y);
+      this.pointerTargetStrength = 1;
+      return;
+    }
+
+    this.pointerTarget.set(0, 0);
+    this.pointerTargetStrength = 0;
   }
 
   setPointerHit(hit = null) {
@@ -1300,6 +1416,16 @@ export class CubesScene extends SceneBase {
   update(delta) {
     // -------- 全局 section 级状态 --------
     this.time += delta;
+    const safeDelta = Math.max(delta, 1 / 240);
+    const rawScrollVelocity = Math.abs((this.progress - this.lastProgress) / safeDelta);
+    this.lastProgress = this.progress;
+    this.scrollVelocity = THREE.MathUtils.lerp(this.scrollVelocity, rawScrollVelocity, 1 - Math.exp(-safeDelta * 8));
+    this.pointerCurrent.lerp(this.pointerTarget, 1 - Math.exp(-safeDelta * 7));
+    this.pointerStrength = THREE.MathUtils.lerp(
+      this.pointerStrength,
+      this.pointerTargetStrength,
+      1 - Math.exp(-safeDelta * 9)
+    );
 
     const stackSpan = this.verticalOffset * (this.cubeGroups.length + 1);
     const scrollOffset = this.progress * stackSpan;
@@ -1313,12 +1439,17 @@ export class CubesScene extends SceneBase {
     const { enterProgress, exitProgress } = this.getSectionHandoffState();
     const entryLift = 1 - enterProgress;
     const cameraTrackY = -scrollOffset;
+    const motionBlurAmount = THREE.MathUtils.clamp(this.scrollVelocity * 0.1, 0, 1);
+    const pointerInfluence = this.pointerStrength
+      * enterProgress
+      * (1 - exitProgress * 0.82)
+      * (1 - this.detailFocusProgress * 0.92);
 
-    this.projectGroup.position.x = 0;
+    this.projectGroup.position.x = this.pointerCurrent.x * 0.18 * pointerInfluence;
     this.projectGroup.position.y = focusOffset;
-    this.projectGroup.position.z = 0;
-    this.root.rotation.x = 0;
-    this.root.rotation.y = 0;
+    this.projectGroup.position.z = this.pointerCurrent.y * -0.12 * pointerInfluence;
+    this.root.rotation.x = this.pointerCurrent.y * 0.05 * pointerInfluence;
+    this.root.rotation.y = this.pointerCurrent.x * 0.075 * pointerInfluence;
 
     // -------- 背景层动画 --------
     if (this.roomBackground) {
@@ -1333,12 +1464,14 @@ export class CubesScene extends SceneBase {
       const cube = this.cubes[index];
       const innerObject = this.innerObjects[index];
       const smokeMaterial = this.smokeMaterials[index];
+      const plexus = this.plexusSystems[index];
       const material = cube.material;
       const baseState = this.cubeBaseStates[index];
       const isFocused = this.detailFocusIndex === index;
       const isHovered = hoverEnabled && this.hoveredProjectIndex === index;
       const focusProgress = this.detailFocusProgress;
       const hoverProgress = isHovered ? 1 : 0;
+      const frostEnergy = this.frostMaps[index]?.soundVelocity ?? 0;
       const centerPresence = 1 - smoothWindow(Math.abs(baseState.centeredProgress - this.progress), 0.1, 0.45);
       const detailHandoffProgress = isFocused
         ? THREE.MathUtils.smoothstep(focusProgress, 0.34, 0.98)
@@ -1367,6 +1500,7 @@ export class CubesScene extends SceneBase {
       const finalScale = baseScale
         * THREE.MathUtils.lerp(0.78, 1, entryStagger)
         * THREE.MathUtils.lerp(1, 1.14, hoverProgress)
+        * THREE.MathUtils.lerp(1, 1.06, frostEnergy)
         * THREE.MathUtils.lerp(1, 0.88, detailHandoffProgress)
         * THREE.MathUtils.lerp(1, 0.52, exitStagger);
       const enteredOpacity = THREE.MathUtils.lerp(0.02, detailOpacity, entryStagger);
@@ -1399,10 +1533,19 @@ export class CubesScene extends SceneBase {
 
       material.opacity = THREE.MathUtils.lerp(enteredOpacity * THREE.MathUtils.lerp(0.12, 1, centerPresence), 0.02, exitStagger);
       material.emissiveIntensity = (THREE.MathUtils.lerp(enteredEmissive, 0.08, exitStagger) + exitGlow * 0.22)
-        * THREE.MathUtils.lerp(0.35, 1, centerPresence);
+        * THREE.MathUtils.lerp(0.35, 1, centerPresence)
+        + frostEnergy * THREE.MathUtils.lerp(0.08, 0.34, hoverProgress * 0.65 + centerPresence * 0.35);
 
       smokeMaterial.uniforms.uTime.value = this.time;
       smokeMaterial.uniforms.uProgress.value = baseState.centeredProgress - this.progress;
+      plexus?.update({
+        delta: safeDelta,
+        time: this.time,
+        visibility: centerPresence * enterProgress * (1 - exitProgress * 0.94) * (1 - detailHandoffProgress * 0.72),
+        hover: hoverProgress,
+        focus: isFocused ? focusProgress : 0,
+        scrollSpeed: motionBlurAmount
+      });
     });
 
     // -------- 背景 shapes / blurry text 辅助层 --------
@@ -1434,20 +1577,80 @@ export class CubesScene extends SceneBase {
     }
 
     // -------- 相机与 billboarding 烟雾 --------
-    this.camera.position.x = 0;
+    const spatialLayerPresence = backgroundPresence * THREE.MathUtils.lerp(1, 0.42, motionBlurAmount);
+
+    if (this.roomRing) {
+      this.roomRing.visible = spatialLayerPresence > 0.01;
+      this.roomRing.position.set(
+        this.pointerCurrent.x * 0.12 * pointerInfluence,
+        cameraTrackY - 0.95 + this.pointerCurrent.y * 0.06 * pointerInfluence,
+        -0.2
+      );
+      this.roomRing.scale.setScalar(THREE.MathUtils.lerp(1.18, 1.38, hoverPresence * 0.45 + this.detailFocusProgress * 0.55));
+      this.roomRing.material.uniforms.uTime.value = this.time;
+      this.roomRing.material.uniforms.uAlpha.value = spatialLayerPresence
+        * THREE.MathUtils.lerp(0.08, 0.24, hoverPresence * 0.55 + this.detailFocusProgress * 0.45);
+    }
+
+    if (this.forcefield) {
+      this.forcefield.visible = spatialLayerPresence > 0.01;
+      this.forcefield.position.set(
+        this.pointerCurrent.x * 0.1 * pointerInfluence,
+        cameraTrackY - 0.08,
+        -0.15
+      );
+      this.forcefield.rotation.y = this.time * 0.12;
+      this.forcefield.rotation.z = this.pointerCurrent.x * 0.08 * pointerInfluence;
+      this.forcefield.scale.set(
+        THREE.MathUtils.lerp(1.2, 1.34, this.detailFocusProgress),
+        THREE.MathUtils.lerp(0.82, 1.05, hoverPresence * 0.4 + this.detailFocusProgress * 0.6),
+        THREE.MathUtils.lerp(1.2, 1.34, this.detailFocusProgress)
+      );
+      this.forcefield.material.uniforms.uTime.value = this.time;
+      this.forcefield.material.uniforms.uAlpha.value = spatialLayerPresence
+        * THREE.MathUtils.lerp(0.03, 0.1, hoverPresence * 0.55 + this.detailFocusProgress * 0.45);
+    }
+
+    this.textCylinders.forEach((mesh, index) => {
+      const opacityBias = index === 0 ? 0.16 : 0.1;
+      mesh.visible = spatialLayerPresence > 0.01;
+      mesh.position.y = cameraTrackY + (index === 0 ? -0.12 : 0.16);
+      mesh.position.x = this.pointerCurrent.x * 0.08 * pointerInfluence * (index === 0 ? 1 : -0.6);
+      mesh.rotation.y += delta * (index === 0 ? 0.05 : -0.04);
+      mesh.material.uniforms.uTime.value = this.time;
+      mesh.material.uniforms.uAlpha.value = spatialLayerPresence
+        * THREE.MathUtils.lerp(opacityBias, opacityBias + 0.1, hoverPresence * 0.55 + this.detailFocusProgress * 0.45);
+    });
+
+    this.camera.position.x = this.pointerCurrent.x * 0.35 * pointerInfluence;
     this.camera.position.y = cameraTrackY;
-    this.camera.position.z = THREE.MathUtils.lerp(5.6 + entryLift * 1.1, 7.9, exitProgress);
-    this.camera.lookAt(0, cameraTrackY, 0);
+    this.camera.position.z = THREE.MathUtils.lerp(5.6 + entryLift * 1.1, 7.9, exitProgress)
+      + motionBlurAmount * 0.5
+      - hoverPresence * 0.18
+      - this.detailFocusProgress * 0.22;
+    this.camera.fov = THREE.MathUtils.lerp(
+      this.baseCameraFov,
+      this.baseCameraFov + motionBlurAmount * 14 - hoverPresence * 2.1 - this.detailFocusProgress * 3.2,
+      0.28
+    );
+    this.camera.updateProjectionMatrix();
+    this.camera.lookAt(
+      this.pointerCurrent.x * 0.22 * pointerInfluence,
+      cameraTrackY + this.pointerCurrent.y * 0.18 * pointerInfluence,
+      0
+    );
     this.camera.updateMatrixWorld();
     this.camera.getWorldQuaternion(this.cameraWorldQuaternion);
 
     this.cubeGroups.forEach((cubeGroup, index) => {
       const smokeMesh = this.smokeMeshes[index];
+      const frostEnergy = this.frostMaps[index]?.soundVelocity ?? 0;
       cubeGroup.updateMatrixWorld();
       cubeGroup.getWorldQuaternion(this.parentWorldQuaternion);
       this.inverseParentQuaternion.copy(this.parentWorldQuaternion).invert();
       smokeMesh.quaternion.copy(this.inverseParentQuaternion.multiply(this.cameraWorldQuaternion));
-      smokeMesh.material.opacity = THREE.MathUtils.lerp(0.65, 1.2, this.hoveredProjectIndex === index ? 1 : 0);
+      smokeMesh.material.opacity = THREE.MathUtils.lerp(0.65, 1.2, this.hoveredProjectIndex === index ? 1 : 0)
+        + frostEnergy * 0.35;
     });
   }
 
@@ -1455,6 +1658,7 @@ export class CubesScene extends SceneBase {
     // transmission target、交互 frost map、辅助几何和材质都需要显式释放。
     this.transmissionTarget.dispose();
     this.frostMaps.forEach((frostMap) => frostMap.dispose());
+    this.plexusSystems.forEach((plexus) => plexus.dispose());
     this.smokeMeshes.forEach((smokeMesh) => {
       smokeMesh.geometry.dispose();
     });
