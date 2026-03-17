@@ -6,6 +6,8 @@ This repository is the clean-room reconstruction workspace for the dumped `www.i
 
 - `docs/reverse-engineering-roadmap.md`
   - Reverse-engineering analysis, migration order and reconstruction roadmap.
+- `docs/igloo-rebuild-architecture.md`
+  - Chinese architecture doc for the current rebuild: module boundaries, code organization and runtime principles.
 - `docs/phase-0/README.md`
   - Phase 0 reverse-engineering dossier and extracted notes.
 
