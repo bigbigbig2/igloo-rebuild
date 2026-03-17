@@ -374,6 +374,17 @@ function createParticleField() {
   };
 }
 
+/**
+ * DetailScene 是项目详情层的独立 3D 场景。
+ *
+ * 它不会直接替代首页，而是作为 overlay 被 HomeSceneRenderer 混入：
+ * - 根据当前 project 动态切换 geometry / texture / accent / stagingPreset
+ * - 从 CubesScene 获取 handoff anchor，完成首页对象到详情对象的接续
+ * - 渲染背景、光晕、光柱、文本圆柱、粒子等辅助层
+ *
+ * 可以把它理解成“每个项目共用的一套 detail 舞台”，
+ * 只是每次上台的主物体和布景参数不同。
+ */
 export class DetailScene extends SceneBase {
   constructor({ assets }) {
     super({
@@ -381,6 +392,7 @@ export class DetailScene extends SceneBase {
       background: '#080c13'
     });
 
+    // -------- 运行时状态 --------
     this.assets = assets;
     this.project = null;
     this.transitionProgress = 0;
@@ -393,10 +405,12 @@ export class DetailScene extends SceneBase {
     this.startQuaternion = new THREE.Quaternion();
     this.finalQuaternion = new THREE.Quaternion();
 
+    // -------- 公共贴图资源 --------
     const perlinTexture = this.assets.get('texture', 'detail-perlin');
     const bokehTexture = this.assets.get('texture', 'detail-bokeh');
     const causticsTexture = this.assets.get('texture', 'detail-caustics');
 
+    // -------- 背景与光层 --------
     this.bgPlane = new THREE.Mesh(
       new THREE.PlaneGeometry(14, 14),
       createDetailBgMaterial(perlinTexture)
@@ -490,6 +504,7 @@ export class DetailScene extends SceneBase {
     this.object.material.transparent = true;
     this.root.add(this.object);
 
+    // -------- 文本圆柱与粒子层 --------
     this.textCylinders = [];
     const blurryCylinderGeometry = prepareGeometry(this.assets.get('geometry', 'blurrytext-cylinder'), {
       size: 5.6,
@@ -570,6 +585,7 @@ export class DetailScene extends SceneBase {
   }
 
   setProject(project) {
+    // 每次切换项目时，DetailScene 都会重设主物体几何、贴图、配色和 staging preset。
     this.project = project;
 
     if (this.ownedGeometry) {
@@ -631,14 +647,17 @@ export class DetailScene extends SceneBase {
   }
 
   setTransitionProgress(progress) {
+    // progress 来自 DetailTransitionState.sceneProgress。
     this.transitionProgress = progress;
   }
 
   setHandoffAnchor(anchor = null) {
+    // anchor 来自 CubesScene.getDetailAnchor()，用于首页 -> 详情页的接续。
     this.handoffAnchor = anchor;
   }
 
   update(delta, elapsed) {
+    // -------- detail 打开总进度拆解 --------
     const progress = THREE.MathUtils.clamp(this.transitionProgress, 0, 1);
     const eased = THREE.MathUtils.smoothstep(progress, 0, 1);
     const handoffMix = THREE.MathUtils.smoothstep(progress, 0.02, 0.62);
@@ -661,6 +680,8 @@ export class DetailScene extends SceneBase {
     );
     const finalScale = THREE.MathUtils.lerp(0.7, 1.03 * preset.objectScale, eased);
 
+    // 如果有首页 handoff 锚点，就从 cube 的屏幕位置与姿态平滑接进来；
+    // 否则直接在 detail 默认舞台位置出现。
     if (this.handoffAnchor?.ndc) {
       this.anchorClipVector.set(this.handoffAnchor.ndc.x, this.handoffAnchor.ndc.y, this.finalObjectVector.clone().project(this.camera).z);
       this.anchorWorldVector.copy(this.anchorClipVector).unproject(this.camera);
@@ -687,6 +708,7 @@ export class DetailScene extends SceneBase {
       this.object.scale.setScalar(finalScale);
     }
 
+    // -------- 舞台辅助层：底座、halo、光柱、light plane --------
     this.pedestal.position.y = THREE.MathUtils.lerp(-2.8, -2.15, eased);
     this.pedestal.material.opacity = eased;
 
@@ -722,6 +744,7 @@ export class DetailScene extends SceneBase {
       THREE.MathUtils.lerp(0.9, 1.05 * preset.columnScale, eased)
     );
 
+    // -------- 文本圆柱与粒子层 --------
     this.textCylinders.forEach((mesh, index) => {
       const drift = Math.sin(elapsed * (0.8 + index * 0.1) * preset.textSpeed + mesh.userData.phase) * 0.06;
       const shimmer = Math.sin(elapsed * 2 + mesh.userData.phase) * 0.25 + 0.75;
@@ -768,6 +791,7 @@ export class DetailScene extends SceneBase {
       this.littleParticles.material.opacity = THREE.MathUtils.lerp(0, preset.littleParticleOpacity, supportReveal);
     }
 
+    // -------- 最终相机 framing --------
     this.camera.position.x = THREE.MathUtils.lerp(0, preset.cameraX, eased) + Math.sin(elapsed * 0.25) * 0.2 * eased;
     this.camera.position.y = THREE.MathUtils.lerp(0.1, 0.5, eased);
     this.camera.position.z = THREE.MathUtils.lerp(7.6, preset.cameraZ, eased);

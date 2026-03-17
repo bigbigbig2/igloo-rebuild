@@ -15,10 +15,26 @@ function toMultilineHtml(text = '') {
   return text.replace(/\n/g, '<br/>');
 }
 
+/**
+ * UIScene 是当前工程的 DOM HUD 实现。
+ *
+ * 它承担的是“功能完整的内容层 UI”：
+ * - manifesto 文案
+ * - 首页 section 标签
+ * - portfolio 列表
+ * - detail 文案与链接
+ * - entry portal 链接
+ * - 首页底部交互提示
+ *
+ * 与 WebGLUiScene 的关系是：
+ * - DOM HUD 更偏完整功能与调试兜底
+ * - WebGL HUD 更偏高保真表现
+ */
 export class UIScene {
   constructor({ container, content }) {
     this.container = container;
     this.content = content;
+    // state 只保存 UI 关心的最小状态切片，避免整份 runtime 状态直接塞进来。
     this.state = {
       routeName: null,
       projectHash: null,
@@ -35,10 +51,12 @@ export class UIScene {
       project: () => {}
     };
 
+    // 整个 HUD 是纯 DOM 结构，作为 overlay 挂载到外层 UI 容器。
     this.root = document.createElement('div');
     this.root.className = 'hud';
     this.container.appendChild(this.root);
 
+    // 主列负责 manifesto 与首页控制，侧列负责 portfolio / detail / links。
     this.root.innerHTML = `
       <div class="hud__column hud__column--main">
         <div class="hud__panel hud__panel--hero" data-manifesto-shell>
@@ -100,6 +118,7 @@ export class UIScene {
   }
 
   bind({ onHome, onPrevious, onNext, onProject }) {
+    // 主控制器会把真实行为回注到 DOM HUD。
     this.handlers.home = onHome;
     this.handlers.previous = onPrevious;
     this.handlers.next = onNext;
@@ -107,12 +126,15 @@ export class UIScene {
   }
 
   bindStaticEvents() {
+    // 这些按钮结构是静态的，所以可以在初始化时一次性绑好。
     this.root.querySelector('[data-action="home"]').addEventListener('click', () => this.handlers.home());
     this.root.querySelector('[data-action="previous"]').addEventListener('click', () => this.handlers.previous());
     this.root.querySelector('[data-action="next"]').addEventListener('click', () => this.handlers.next());
   }
 
   renderProjectCards(activeHash = null) {
+    // 首页 portfolio 卡片采用“整段重渲染”的策略，
+    // 这样 active / hovered 状态切换时逻辑最直接。
     this.projectList.innerHTML = `
       <p class="hud__eyebrow">Portfolio</p>
       <div class="hud__stack">
@@ -133,6 +155,7 @@ export class UIScene {
   }
 
   renderEntryPanel() {
+    // entry section 当前仍由 DOM HUD 展示外链，作为 WebGL 版本落地前的功能兜底。
     this.entryPanel.innerHTML = `
       <div class="hud__entry">
         <div class="hud__entry-block" data-entry-block="header">
@@ -159,12 +182,14 @@ export class UIScene {
   }
 
   renderSocialLinks() {
+    // 全站 social links 是静态内容，初始化后通常不需要再频繁重建。
     this.socialLinks.innerHTML = this.content.social.map((link) => `
       <a class="hud__link" href="${link.url}" target="_blank" rel="noreferrer">${link.label}</a>
     `).join('');
   }
 
   renderProjectDetail(project = null) {
+    // detail 卡片是“有项目时渲染、无项目时清空”的模式。
     if (!project) {
       this.projectDetail.classList.add('is-hidden');
       this.projectDetail.innerHTML = '';
@@ -212,6 +237,7 @@ export class UIScene {
   }
 
   applyManifestoPresentation(iglooPresentation = null, route = null, activeSectionKey = null) {
+    // manifesto 的 reveal 完全由 IglooScene 暴露的 presentationState 驱动。
     const isIglooActive = route?.name === 'home' && activeSectionKey === 'igloo';
     const panelProgress = isIglooActive ? (iglooPresentation?.panelProgress ?? 0) : 0;
     const brandProgress = isIglooActive ? (iglooPresentation?.brandProgress ?? panelProgress) : 0.3;
@@ -254,6 +280,7 @@ export class UIScene {
   }
 
   applyEntryPresentation(entryPresentation = null, route = null, activeSectionKey = null, hasProject = false) {
+    // 当首页进入 entry section 时，右侧 entry panel 会独立接管侧栏内容区。
     const isEntryActive = route?.name === 'home' && activeSectionKey === 'entry' && !hasProject;
     const panelProgress = isEntryActive ? (entryPresentation?.panelProgress ?? 0) : 0;
     const linksProgress = isEntryActive ? (entryPresentation?.linksProgress ?? 0) : 0;
@@ -300,6 +327,7 @@ export class UIScene {
   }
 
   applyDetailBlockPresentation(detailUiProgress = 0) {
+    // detail 卡片内部并不是整体同时出现，而是按 header / summary / links 分段 reveal。
     const blocks = [
       { key: 'header', start: 0.08, end: 0.34, offset: 16 },
       { key: 'summary', start: 0.2, end: 0.46, offset: 18 },
@@ -326,6 +354,7 @@ export class UIScene {
   }
 
   applyDetailPresentation(detailUiProgress = 0, hasProject = false) {
+    // 详情页打开时，左侧项目列表会让位给 detail 卡片。
     const reveal = Math.max(0, Math.min(1, detailUiProgress));
     const listOpacity = hasProject ? Math.max(0.14, 1 - reveal * 1.2) : 1;
     const listOffset = hasProject ? reveal * -12 : 0;
@@ -352,6 +381,7 @@ export class UIScene {
   }
 
   applyCubesHomePresentation(route = null, activeSectionKey = null, hasProject = false) {
+    // cubes section 首页阶段更依赖 WebGL HUD，因此会压低 DOM HUD 可见度。
     const isCubesHome = route?.name === 'home' && activeSectionKey === 'cubes' && !hasProject;
     const sidePanels = [this.projectList, this.root.querySelector('[data-social-panel]')].filter(Boolean);
     const hiddenOpacity = isCubesHome ? '0' : '';
@@ -385,6 +415,7 @@ export class UIScene {
   }
 
   applyEntryHomePresentation(route = null, activeSectionKey = null, hasProject = false) {
+    // entry section 会进一步把首页常规 HUD 让位给 portal 面板。
     const isEntryHome = route?.name === 'home' && activeSectionKey === 'entry' && !hasProject;
     const panels = [
       this.manifestoShell,
@@ -406,6 +437,7 @@ export class UIScene {
   }
 
   update(state) {
+    // 先处理最轻量的文本更新，再处理更重的面板显隐和重渲染。
     if (this.state.sectionLabel !== state.sectionLabel) {
       this.sectionLabel.textContent = state.sectionLabel;
       this.state.sectionLabel = state.sectionLabel;
@@ -435,6 +467,7 @@ export class UIScene {
 
     this.state.detailUiProgress = nextDetailUiProgress;
 
+    // 如果关键状态没变，就不重渲染列表与 detail 卡片，避免不必要 DOM 抖动。
     if (
       this.state.routeName === nextRouteName
       && this.state.projectHash === nextProjectHash

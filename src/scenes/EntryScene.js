@@ -889,9 +889,20 @@ function createParticleMaterial({ color = '#ffd4a6', opacity = 0.7, size = 0.05 
   });
 }
 
+/**
+ * EntryScene 是首页最后一段的 portal / outbound links 场景。
+ *
+ * 它负责把首页从 portfolio stack 引导到一个“出口空间”：
+ * - 三层 portal ring
+ * - forcefield / plasma / smoke trail
+ * - floor / room ring / tunnel / particles
+ * - 对应 entry section 的 UI presentation 输出
+ * - 对应 entry profile 的专用后处理参数输出
+ */
 export class EntryScene extends SceneBase {
   constructor({ assets }) {
     super({ name: 'entry', background: '#09070e' });
+    // -------- 运行时状态 --------
     this.assets = assets;
     this.resolution = new THREE.Vector2(1, 1);
     this.portalRings = [];
@@ -906,6 +917,7 @@ export class EntryScene extends SceneBase {
     this.lastProgress = 0;
     this.direction = 1;
 
+    // -------- 资源准备 --------
     const windNoise = assets.get('texture', 'wind-noise') ?? assets.get('texture', 'detail-perlin');
     const perlinTexture = assets.get('texture', 'detail-perlin') ?? windNoise;
     const trianglesTexture = assets.get('texture', 'triangles-tiling') ?? null;
@@ -917,6 +929,7 @@ export class EntryScene extends SceneBase {
     const ceilingSmokeGeometry = rawGeometry(assets.get('geometry', 'ceiling-smoke'), { recomputeNormals: false });
     const blurryTextCylinderGeometry = ensureRandAttribute(rawGeometry(assets.get('geometry', 'blurrytext-cylinder'), { recomputeNormals: false }));
 
+    // -------- 包围空间与地面 --------
     this.lightroom = new THREE.Mesh(new THREE.SphereGeometry(100, 32, 32), createLightroomMaterial(assets.get('texture', 'dot-pattern')));
     this.lightroom.position.y = -12.15;
     this.lightroom.renderOrder = 2;
@@ -935,6 +948,7 @@ export class EntryScene extends SceneBase {
     this.root.add(this.floor);
     this.materials.push(this.floor.material);
 
+    // -------- 三层主要 portal ring --------
     const ringSpecs = [
       { geometry: ringSecondaryGeometry, map: assets.get('texture', 'ring-secondary-color') ?? assets.get('texture', 'ring-color'), aoMap: assets.get('texture', 'ring-secondary-ao') ?? assets.get('texture', 'ring-ao'), positionY: -1.65, scale: 1.0 },
       { geometry: ringGeometry, map: assets.get('texture', 'ring-color'), aoMap: assets.get('texture', 'ring-ao'), positionY: -4.15, scale: 0.92 },
@@ -951,6 +965,7 @@ export class EntryScene extends SceneBase {
       this.materials.push(ring.material);
     });
 
+    // -------- 房间辅助层：room ring / forcefield / plasma / portal forcefield --------
     this.roomRing = new THREE.Mesh((() => {
       const geometry = new THREE.PlaneGeometry(1, 1);
       geometry.rotateX(Math.PI * 0.5);
@@ -989,6 +1004,7 @@ export class EntryScene extends SceneBase {
     this.root.add(this.portalForcefield);
     this.materials.push(this.portalForcefield.material);
 
+    // -------- 烟雾与文字圆柱 --------
     if (smokeTrailGeometry) {
       let currentY = -1.6;
       for (let index = 0; index < 3; index += 1) {
@@ -1049,6 +1065,7 @@ export class EntryScene extends SceneBase {
       this.materials.push(this.textCylinder4.material);
     }
 
+    // -------- 通道与粒子 --------
     this.tunnel = new THREE.Mesh((() => {
       const geometry = new THREE.CylinderGeometry(1.3, 1.3, 9, 64, 32, true);
       geometry.translate(0, -4.5, 0);
@@ -1072,6 +1089,8 @@ export class EntryScene extends SceneBase {
   }
 
   computePresentationState(progress = this.progress, enterProgress = 1) {
+    // entry section 暴露给 HUD 的不是所有 3D 状态，
+    // 而是 panel / links / room ring / portal core 等关键 reveal 阶段。
     const panelProgress = smoothWindow(progress, 0.5, 0.72) * enterProgress;
     const linksProgress = smoothWindow(progress, 0.58, 0.82) * enterProgress;
     const roomRingProgress = smoothWindow(progress, 0.53, 0.7) * enterProgress;
@@ -1085,6 +1104,7 @@ export class EntryScene extends SceneBase {
   }
 
   getColorCorrectionState() {
+    // HomeSceneRenderer 会使用这些参数驱动 entry 专属后处理。
     return { profile: 'entry', ringProximity: this.postState.ringProximity, squareAttr: this.postState.squareAttr };
   }
 
@@ -1101,6 +1121,7 @@ export class EntryScene extends SceneBase {
   }
 
   setSize(width, height) {
+    // entry section 中有大量依赖屏幕尺寸的 shader，需要统一更新 uResolution。
     super.setSize(width, height);
     this.resolution.set(width, height);
     this.camera.zoom = Math.min(1, (width / Math.max(height, 1)) * 1.5);
@@ -1113,6 +1134,7 @@ export class EntryScene extends SceneBase {
   }
 
   update(delta, elapsed) {
+    // -------- 进入节奏：从 cubes 进入时会有单独 enterProgress --------
     const isIncomingFromCubes = this.transitionState?.role === 'next' && this.transitionState?.previousKey === 'cubes';
     const enterProgress = isIncomingFromCubes ? THREE.MathUtils.smoothstep(this.transitionState.enterProgress ?? 0, 0, 1) : 1;
     const progress = this.progress;
@@ -1129,6 +1151,7 @@ export class EntryScene extends SceneBase {
       this.postState.squareAttr.set(Math.random() * 25.424, Math.random() * 64.453, scale);
     });
 
+    // postState 会被 HomeSceneRenderer 的 entry pass 读取，用来控制 portal 扭曲强度。
     this.postState.ringProximity = RING_PULSES.reduce((accumulator, pulse) => {
       if (timePosition < pulse.start) return accumulator;
       if (timePosition < pulse.start + pulse.inDuration) return Math.max(accumulator, easeIn((timePosition - pulse.start) / pulse.inDuration));
@@ -1139,6 +1162,7 @@ export class EntryScene extends SceneBase {
 
     this.presentationState = this.computePresentationState(progress, enterProgress);
 
+    // -------- 全局 reveal 节奏 --------
     const roomRingReveal = smoothWindow(progress, 0.53, 0.7);
     const portalCoreProgress = smoothWindow(progress, 0.54, 0.76) * (1 - smoothWindow(progress, 0.88, 1));
     const interactionPulse = smoothWindow(progress, 0.6, 0.78) * (1 - smoothWindow(progress, 0.9, 1));
@@ -1149,6 +1173,7 @@ export class EntryScene extends SceneBase {
     const upRotation = Math.PI * easeInOut(clamp01((timePosition - 1.0) / 5.25));
     const upOriginal = clamp01((timePosition - 3.5) / 3.7);
 
+    // -------- 相机与整体姿态变化 --------
     this.root.rotation.z = upRotation * 0.08;
     this.camera.position.set(
       0,
@@ -1163,6 +1188,7 @@ export class EntryScene extends SceneBase {
     this.camera.up.set(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), upRotation).lerp(new THREE.Vector3(0, 1, 0), upOriginal).normalize();
     this.camera.lookAt(0, THREE.MathUtils.lerp(-2.5, -10.35, easeInOut(clamp01((timePosition - 0.2) / 9.0))), THREE.MathUtils.lerp(-1, 0, easeOut(clamp01(timePosition / 2.5))));
 
+    // -------- 主体层：ring / forcefield / plasma --------
     const ringEnds = [0.34, 0.43, 0.52];
     this.portalRings.forEach(({ ring }, index) => {
       const ringReveal = 1 - smoothWindow(progress, ringEnds[index] - 0.14, ringEnds[index]);
@@ -1187,6 +1213,7 @@ export class EntryScene extends SceneBase {
       plasma.material.uniforms.uOpacity.value = reveal * (0.26 - index * 0.03) * (1 + interactionPulse * 0.18);
     });
 
+    // -------- 烟雾、地面、文字圆柱、粒子等辅助层 --------
     const smokeEnds = [0.37, 0.47, 0.56];
     this.smokeTrails.forEach(({ mesh, initialRotation }, index) => {
       const reveal = smoothWindow(progress, 0.02, 0.1) * (1 - smoothWindow(progress, smokeEnds[index] - 0.08, smokeEnds[index]));

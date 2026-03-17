@@ -213,6 +213,19 @@ function formatCubeTemperature(baseTemp = 0, elapsed = 0, seed = 0) {
   return `TEMP  ${fahrenheitLabel}\n${celsiusLabel}`;
 }
 
+/**
+ * WebGLUiScene 是首页高保真 HUD 的 WebGL 实现。
+ *
+ * 当前它主要负责：
+ * - 左上 logo
+ * - 左下 sound 状态
+ * - manifesto 区块的 WebGL 文本展示
+ * - cubes section 的框线、标题、日期、温度标注
+ *
+ * 它不试图完全替代 DOM HUD，而是与 UIScene 并行存在：
+ * - UIScene 保证功能完整
+ * - WebGLUiScene 负责逐步接管更接近原站风格的可视层
+ */
 export class WebGLUiScene {
   constructor({ content, assets }) {
     this.content = content;
@@ -249,10 +262,12 @@ export class WebGLUiScene {
       cubesPresentation: null
     };
 
+    // heroGroup 用于承载 logo / manifesto / legal 等首页上层信息。
     this.heroGroup = new THREE.Group();
     this.legalGroup = new THREE.Group();
     this.manifestoGroup = new THREE.Group();
     this.soundGroup = new THREE.Group();
+    // cubesGroup 独立承载 portfolio section 的 UI 锚点框线与文字。
     this.cubesGroup = new THREE.Group();
 
     this.scene.add(this.heroGroup);
@@ -300,6 +315,7 @@ export class WebGLUiScene {
   }
 
   async init() {
+    // WebGL HUD 依赖字体 metrics 与 atlas 纹理，ready 之前只能回退 DOM HUD。
     this.fontData = await loadFontMetrics('/reference-assets/fonts/IBMPlexMono-Medium.json');
     const fontTexture = this.assets?.get('texture', 'ui-font-mono') ?? null;
 
@@ -412,9 +428,11 @@ export class WebGLUiScene {
     return this.readyState === 'ready';
   }
 
+  // 为了兼容 HomeSceneRenderer 的调用约定，这里保留空实现。
   setActive() {}
 
   setSize(width, height) {
+    // WebGL HUD 本质是屏幕空间 scene，所以正交相机边界直接跟视口绑定。
     this.size.width = width;
     this.size.height = height;
     this.camera.left = -width * 0.5;
@@ -426,6 +444,7 @@ export class WebGLUiScene {
   }
 
   updateTextContent() {
+    // 这类静态文本只在内容变化时重建字形，避免每帧重排。
     if (!this.fontData || this.readyState !== 'ready') {
       return;
     }
@@ -438,6 +457,8 @@ export class WebGLUiScene {
   }
 
   updateCubesOverlayContent() {
+    // cubes overlay 的标题和 meta 只在项目切换时更新；
+    // 温度会随着时间缓慢浮动，因此可能更频繁刷新。
     if (this.readyState !== 'ready') {
       return;
     }
@@ -463,6 +484,7 @@ export class WebGLUiScene {
   }
 
   applyCubesPresentation() {
+    // 只有首页 cubes section 且没有进入 detail 时，cubes overlay 才真正显示。
     if (this.readyState !== 'ready') {
       return;
     }
@@ -564,6 +586,8 @@ export class WebGLUiScene {
   }
 
   layout() {
+    // layout 负责把逻辑组件摆放到当前屏幕尺寸下的合理位置。
+    // 这里区分了 desktop / small / mobile 三种近似布局档位。
     const width = this.size.width;
     const height = this.size.height;
     const small = width < 1180 || height < 820;
@@ -626,6 +650,7 @@ export class WebGLUiScene {
   }
 
   update(nextState = {}) {
+    // update 只做“状态写入 + 必要时刷新文本 / 重新布局”。
     const nextMuted = nextState.muted ?? this.state.muted;
     const nextCopyright = nextState.copyright ?? this.state.copyright;
     const nextRights = nextState.rights ?? this.state.rights;
@@ -658,6 +683,7 @@ export class WebGLUiScene {
   }
 
   applyState() {
+    // applyState 根据当前 route / section / detail 状态真正决定哪些 UI 组可见。
     const isIglooHome = this.state.routeName === 'home'
       && this.state.activeSectionKey === 'igloo'
       && !this.state.hasProject;
@@ -704,6 +730,7 @@ export class WebGLUiScene {
   }
 
   animate(delta, elapsed) {
+    // animate 是 WebGL HUD 的逐帧动画层，例如 logo 呼吸和 sound pulse。
     this.elapsed = elapsed;
 
     if (this.heroGroup.visible) {
@@ -729,6 +756,7 @@ export class WebGLUiScene {
   }
 
   dispose() {
+    // WebGL HUD 自己创建了多套 geometry / material / text block，需要显式释放。
     this.logoMesh.geometry.dispose();
     this.logoMesh.material.dispose();
     this.soundIcon.geometry.dispose();

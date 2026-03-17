@@ -666,6 +666,17 @@ function createTextCylinderMaterial(atlasTexture, options = {}) {
   });
 }
 
+/**
+ * CubesScene 是首页 portfolio section 的核心交互场景。
+ *
+ * 它承担了三层职责：
+ * 1. 首页中段的 cube stack 演出
+ * 2. 项目 hover / pick / click 的交互入口
+ * 3. 首页到 detail scene 的视觉 handoff 桥梁
+ *
+ * 这里既有 3D 场景编排，也有 transmission capture、鼠标霜冻效果、
+ * 以及给 WebGL HUD 提供的屏幕锚点计算。
+ */
 export class CubesScene extends SceneBase {
   constructor({ assets, projects }) {
     super({
@@ -673,6 +684,7 @@ export class CubesScene extends SceneBase {
       background: '#d7dde8'
     });
 
+    // -------- 运行时状态 --------
     this.assets = assets;
     this.projects = projects;
     this.time = 0;
@@ -737,11 +749,13 @@ export class CubesScene extends SceneBase {
 
     this.root.add(this.projectGroup);
 
+    // -------- 基础灯光 --------
     const ambient = new THREE.AmbientLight('#f0f4ff', 1.4);
     const keyLight = new THREE.DirectionalLight('#ffffff', 2.2);
     keyLight.position.set(3, 5, 6);
     this.add(ambient, keyLight);
 
+    // -------- 屏幕空间背景层与辅助层 --------
     this.roomBackground = new THREE.Mesh(
       new THREE.PlaneGeometry(2, 2),
       new THREE.ShaderMaterial({
@@ -838,6 +852,12 @@ export class CubesScene extends SceneBase {
       this.add(this.blurryText);
     }
 
+    // -------- 项目立方体栈 --------
+    // 每个项目都会生成：
+    // - 外层 transmission cube
+    // - 内层对象
+    // - 配套烟雾平面
+    // - 一张独立的鼠标霜冻贴图
     projects.forEach((project, index) => {
       const assetConfig = getCubeAssetConfig(project);
       const innerAssetConfig = getInnerObjectAssetConfig(project);
@@ -932,6 +952,7 @@ export class CubesScene extends SceneBase {
   }
 
   getAutoCenterProgress() {
+    // 非 detail 聚焦状态下，会自动吸附到“离当前 progress 最近的 cube”。
     if (this.detailFocusIndex >= 0) {
       return this.cubeBaseStates[this.detailFocusIndex]?.centeredProgress
         ?? this.getInitialAutoCenterProgress();
@@ -953,6 +974,7 @@ export class CubesScene extends SceneBase {
   }
 
   ensureTransmissionTarget(width = 1, height = 1) {
+    // transmission capture 依赖单独离屏目标，尺寸变化时才重建。
     const nextWidth = Math.max(1, Math.round(width));
     const nextHeight = Math.max(1, Math.round(height));
 
@@ -967,6 +989,8 @@ export class CubesScene extends SceneBase {
   }
 
   setTransmissionCaptureState(capturing) {
+    // transmission 采样时需要“只看内层对象，不看外壳 cube 本身”，
+    // 所以这里通过显隐切换场景层，先 capture 再恢复。
     if (this.transmissionState.capturing === capturing) {
       return;
     }
@@ -1004,6 +1028,8 @@ export class CubesScene extends SceneBase {
   }
 
   updateTransmissionUniforms(width, height) {
+    // 每个 cube 的 transmission 材质都共享同一张 capture 结果，
+    // 但仍要同步各自的分辨率与噪声偏移。
     this.transmissionMaterials.forEach((material, index) => {
       material.setTransmissionTexture(this.transmissionTarget.texture, width, height);
       material.setResolution(width, height);
@@ -1013,12 +1039,14 @@ export class CubesScene extends SceneBase {
   }
 
   updateInteractiveEffects(renderer) {
+    // 鼠标霜冻图属于每个项目自己的交互特效，逐帧独立更新。
     this.frostMaps.forEach((frostMap) => {
       frostMap.update(renderer, this.time);
     });
   }
 
   prepareForRender(renderer, renderState = {}) {
+    // 在正式参与首页 composite 前，先完成 transmission capture pass。
     const width = renderState.renderWidth ?? renderState.width ?? 1;
     const height = renderState.renderHeight ?? renderState.height ?? 1;
     const previousTarget = renderer.getRenderTarget();
@@ -1042,6 +1070,7 @@ export class CubesScene extends SceneBase {
   }
 
   setDetailFocus(projectHash = null, progress = 0) {
+    // detail 打开时，CubesScene 不会立刻消失，而是先把被选中的项目做聚焦 / 退场。
     this.detailFocusHash = projectHash;
     this.detailFocusProgress = THREE.MathUtils.clamp(progress, 0, 1);
     this.detailFocusIndex = this.projects.findIndex((project) => project.hash === projectHash);
@@ -1053,6 +1082,7 @@ export class CubesScene extends SceneBase {
   }
 
   setPointerHit(hit = null) {
+    // 只有拿到 uv 的命中结果时，霜冻图才知道鼠标在 cube 表面的哪个位置。
     const previousIndex = this.pointerProjectIndex;
     const nextIndex = hit?.index ?? -1;
 
@@ -1068,6 +1098,7 @@ export class CubesScene extends SceneBase {
   }
 
   pickProjectHit(normalizedPointer) {
+    // 对 cubes 数组做射线拾取，返回 project、uv、point 等完整命中信息。
     if (!normalizedPointer) {
       return null;
     }
@@ -1098,6 +1129,8 @@ export class CubesScene extends SceneBase {
   }
 
   getDetailAnchor(projectHash = this.detailFocusHash) {
+    // detail scene 通过这里拿到被选中 cube 的屏幕位置、旋转和缩放，
+    // 从而实现首页对象到 detail 对象的镜头接续。
     const index = this.projects.findIndex((project) => project.hash === projectHash);
     const cube = index >= 0 ? this.cubes[index] : null;
 
@@ -1132,6 +1165,7 @@ export class CubesScene extends SceneBase {
   }
 
   getOverlayPresentation() {
+    // 给 WebGLUiScene 输出当前激活项目的屏幕锚点与框线点位。
     const { enterProgress, exitProgress } = this.getSectionHandoffState();
     const activeIndex = this.hoveredProjectIndex >= 0
       ? this.hoveredProjectIndex
@@ -1244,6 +1278,8 @@ export class CubesScene extends SceneBase {
   }
 
   getSectionHandoffState() {
+    // CubesScene 既要承接 Igloo -> Cubes 的进入，
+    // 也要处理 Cubes -> Entry 的离场，所以单独拆了 handoff 状态。
     const isIncomingFromIgloo = this.transitionState?.role === 'next' && this.transitionState?.previousKey === 'igloo';
     const isOutgoingToEntry = this.transitionState?.role === 'current' && this.transitionState?.nextKey === 'entry';
     const enterProgress = isIncomingFromIgloo
@@ -1262,6 +1298,7 @@ export class CubesScene extends SceneBase {
   }
 
   update(delta) {
+    // -------- 全局 section 级状态 --------
     this.time += delta;
 
     const stackSpan = this.verticalOffset * (this.cubeGroups.length + 1);
@@ -1283,6 +1320,7 @@ export class CubesScene extends SceneBase {
     this.root.rotation.x = 0;
     this.root.rotation.y = 0;
 
+    // -------- 背景层动画 --------
     if (this.roomBackground) {
       this.roomBackground.material.uniforms.uTime.value = this.time;
       this.roomBackground.material.uniforms.uProgress.value = this.progress;
@@ -1290,6 +1328,7 @@ export class CubesScene extends SceneBase {
       this.roomBackground.material.uniforms.uBlueOffset.value.copy(this.blueOffset);
     }
 
+    // -------- 每个项目 cube 的排布、聚焦、hover 与离场动画 --------
     this.cubeGroups.forEach((cubeGroup, index) => {
       const cube = this.cubes[index];
       const innerObject = this.innerObjects[index];
@@ -1366,6 +1405,7 @@ export class CubesScene extends SceneBase {
       smokeMaterial.uniforms.uProgress.value = baseState.centeredProgress - this.progress;
     });
 
+    // -------- 背景 shapes / blurry text 辅助层 --------
     const backgroundPresence = enterProgress
       * (1 - exitProgress * 0.92)
       * (1 - this.detailFocusProgress * 0.82);
@@ -1393,6 +1433,7 @@ export class CubesScene extends SceneBase {
         * (1 - this.detailFocusProgress * 0.78);
     }
 
+    // -------- 相机与 billboarding 烟雾 --------
     this.camera.position.x = 0;
     this.camera.position.y = cameraTrackY;
     this.camera.position.z = THREE.MathUtils.lerp(5.6 + entryLift * 1.1, 7.9, exitProgress);
@@ -1411,6 +1452,7 @@ export class CubesScene extends SceneBase {
   }
 
   dispose() {
+    // transmission target、交互 frost map、辅助几何和材质都需要显式释放。
     this.transmissionTarget.dispose();
     this.frostMaps.forEach((frostMap) => frostMap.dispose());
     this.smokeMeshes.forEach((smokeMesh) => {
@@ -1440,6 +1482,7 @@ export class CubesScene extends SceneBase {
   setSize(width, height) {
     super.setSize(width, height);
 
+    // 与其他首页 scene 保持一致，使用 zoom 修正超宽屏效果。
     if (this.camera.isPerspectiveCamera) {
       this.camera.zoom = Math.min(1, (width / height) * 1.25);
       this.camera.updateProjectionMatrix();

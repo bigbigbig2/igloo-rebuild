@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 
+// 首页 section 之间的全屏合成 shader：
+// - tSceneA / tSceneB 分别是当前 section 与下一 section
+// - tDetail / tCubes 用于首页与 detail overlay 之间的接力
+// - tScroll / tFrost / tBlue 为过渡提供数据纹理与噪声纹理
 const COMPOSITE_VERTEX_SHADER = /* glsl */ `
   varying vec2 vUv;
 
@@ -155,6 +159,7 @@ const COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
   }
 `;
 
+// Igloo section 使用 3D LUT 做颜色校正。
 const LUT_VERTEX_SHADER = /* glsl */ `
   out vec2 vUv;
 
@@ -263,6 +268,7 @@ const LUT_FRAGMENT_SHADER = /* glsl */ `
   }
 `;
 
+// Entry section 使用独立的后处理 shader，负责 portal 感更强的扭曲和染色。
 const ENTRY_POST_VERTEX_SHADER = /* glsl */ `
   varying vec2 vUv;
 
@@ -351,6 +357,7 @@ const ENTRY_POST_FRAGMENT_SHADER = /* glsl */ `
 `;
 
 function createRenderTarget(width, height) {
+  // 所有离屏目标统一使用 sRGB 颜色空间，避免合成时颜色不一致。
   const target = new THREE.WebGLRenderTarget(width, height, {
     depthBuffer: true,
     stencilBuffer: false
@@ -361,6 +368,9 @@ function createRenderTarget(width, height) {
 }
 
 function prepareSceneForRender(scene, renderer, renderState, preparedScenes) {
+  // 某些 scene 在正式 render 前需要先做一次离屏准备，例如：
+  // - CubesScene 先捕获 transmission 纹理
+  // - IglooScene 根据 renderSize 更新特定 uniform
   if (!scene || preparedScenes.has(scene)) {
     return;
   }
@@ -374,11 +384,13 @@ function getColorCorrectionState(scene) {
     return null;
   }
 
+  // 如果 scene 自己能提供颜色校正配置，则以 scene 自己的声明为准。
   const sceneState = scene.getColorCorrectionState?.() ?? null;
   if (sceneState?.profile) {
     return sceneState;
   }
 
+  // 对没有显式声明但已知需要校正的场景做兜底。
   if (scene.name === 'igloo') {
     return {
       profile: 'igloo',
@@ -389,23 +401,41 @@ function getColorCorrectionState(scene) {
   return null;
 }
 
+/**
+ * HomeSceneRenderer 是首页真正的“组合渲染器”。
+ *
+ * Engine 并不是直接 render 某个首页 scene，而是把当前 view 设成它，
+ * 然后由它负责完成整条首页渲染管线：
+ * 1. 更新当前 scene / next scene / detail scene / cubes scene
+ * 2. 把这些场景分别渲染到离屏 RenderTarget
+ * 3. 按 scene 类型做颜色校正或专用后处理
+ * 4. 在 composite shader 中完成首页 section 过渡与 detail overlay 混合
+ * 5. 视情况叠加 bloom
+ * 6. 最后叠加 WebGL UI
+ *
+ * 这样场景本身只关心“自己怎么更新”，而复杂的“多场景怎么合成”
+ * 则统一收敛在 HomeSceneRenderer。
+ */
 export class HomeSceneRenderer {
   constructor({ scenes = {}, assets = null } = {}) {
     this.name = 'home-renderer';
     this.active = false;
     this.scenes = scenes;
     this.assets = assets;
+    // renderState 由 MainController 每帧注入，描述当前首页该如何组合。
     this.renderState = null;
     this.size = {
       width: 1,
       height: 1,
       pixelRatio: 1
     };
+    // blueOffset 持续变化，用来让蓝噪声采样每帧略微偏移，减少静态噪点感。
     this.blueOffset = new THREE.Vector2(0, 0);
     this.iglooSceneLut = this.assets?.get('texture', 'igloo-scene-lut') ?? null;
     this.overlayScene = null;
     this.elapsed = 0;
 
+    // -------- 全屏合成 pass --------
     this.compositeScene = new THREE.Scene();
     this.compositeCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
     this.compositeMaterial = new THREE.ShaderMaterial({
@@ -433,6 +463,7 @@ export class HomeSceneRenderer {
     this.compositeQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.compositeMaterial);
     this.compositeScene.add(this.compositeQuad);
 
+    // -------- Igloo LUT color correction pass --------
     this.lutScene = new THREE.Scene();
     this.lutCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
     this.lutMaterial = new THREE.ShaderMaterial({
@@ -452,6 +483,7 @@ export class HomeSceneRenderer {
     this.lutQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.lutMaterial);
     this.lutScene.add(this.lutQuad);
 
+    // -------- Entry 专用后处理 pass --------
     this.entryPostScene = new THREE.Scene();
     this.entryPostCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
     this.entryPostMaterial = new THREE.ShaderMaterial({
@@ -472,6 +504,12 @@ export class HomeSceneRenderer {
     this.entryPostQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.entryPostMaterial);
     this.entryPostScene.add(this.entryPostQuad);
 
+    // -------- 离屏 RenderTarget --------
+    // A/B：当前首页场景与下一首页场景
+    // Detail：detail scene
+    // Cubes：当前 cubes scene，detail handoff 时会单独采样
+    // PostA/PostB：颜色校正或 entry 后处理后的中间结果
+    // Composite：最终合成后、进入 bloom 前的中间结果
     this.renderTargetA = createRenderTarget(1, 1);
     this.renderTargetB = createRenderTarget(1, 1);
     this.renderTargetDetail = createRenderTarget(1, 1);
@@ -489,16 +527,19 @@ export class HomeSceneRenderer {
 
   setScenes(scenes) {
     this.scenes = scenes;
+    // 场景表被替换后，立刻把新的尺寸同步给所有 scene。
     Object.values(this.scenes).forEach((scene) => {
       scene.setSize(this.size.width, this.size.height);
     });
   }
 
   setRenderState(renderState) {
+    // renderState 不是内部推导的，而是由 MainController 每帧准备好后喂进来。
     this.renderState = renderState;
   }
 
   setOverlayScene(overlayScene) {
+    // overlayScene 通常是 WebGLUiScene，它会在最终合成后再叠到屏幕上。
     this.overlayScene = overlayScene;
     this.overlayScene?.setSize?.(this.size.width, this.size.height, this.size.pixelRatio);
   }
@@ -508,6 +549,7 @@ export class HomeSceneRenderer {
     this.size.height = height;
     this.size.pixelRatio = pixelRatio;
 
+    // 实际离屏分辨率使用物理像素尺寸，而 scene 本体仍使用逻辑尺寸。
     const renderWidth = Math.max(1, Math.round(width * pixelRatio));
     const renderHeight = Math.max(1, Math.round(height * pixelRatio));
 
@@ -520,18 +562,23 @@ export class HomeSceneRenderer {
     this.renderTargetPostEntry.setSize(renderWidth, renderHeight);
     this.renderTargetComposite.setSize(renderWidth, renderHeight);
     this.bloomPass.setSize(renderWidth, renderHeight);
+    // 全屏 pass 的分辨率 uniform 需要按离屏目标尺寸更新。
     this.compositeMaterial.uniforms.uResolution.value.set(renderWidth, renderHeight);
     this.entryPostMaterial.uniforms.uResolution.value.set(renderWidth, renderHeight);
 
+    // 逻辑尺寸同步给场景自己的 camera / layout。
     Object.values(this.scenes).forEach((scene) => {
       scene.setSize(width, height);
     });
 
+    // detailScene 与 overlayScene 虽然不在 this.scenes 表里，
+    // 但依然要跟着首页尺寸一起刷新。
     this.renderState?.detailScene?.setSize?.(width, height);
     this.overlayScene?.setSize?.(width, height, pixelRatio);
   }
 
   applyColorCorrection(renderer, sourceTarget, destinationTarget, colorCorrectionState) {
+    // Entry profile：走 portal 风格的专用后处理。
     if (colorCorrectionState?.profile === 'entry') {
       this.entryPostMaterial.uniforms.tDiffuse.value = sourceTarget.texture;
       this.entryPostMaterial.uniforms.uBlueOffset.value.copy(this.blueOffset);
@@ -544,6 +591,7 @@ export class HomeSceneRenderer {
       return destinationTarget.texture;
     }
 
+    // 非 igloo profile：直接返回原始贴图，不额外处理。
     if (
       colorCorrectionState?.profile !== 'igloo'
       || !this.iglooSceneLut?.isData3DTexture
@@ -551,6 +599,7 @@ export class HomeSceneRenderer {
       return sourceTarget.texture;
     }
 
+    // Igloo profile：通过 3D LUT 与梯度控制做色彩风格化。
     this.lutMaterial.uniforms.tDiffuse.value = sourceTarget.texture;
     this.lutMaterial.uniforms.tLUT.value = this.iglooSceneLut;
     this.lutMaterial.uniforms.uLUTSize.value = this.iglooSceneLut.image?.width ?? 1;
@@ -566,6 +615,7 @@ export class HomeSceneRenderer {
   applyBloom(renderer, sourceTarget, destinationTarget, bloomState) {
     const strength = bloomState?.bloomStrength ?? 0;
 
+    // bloom 强度接近 0 时直接跳过，避免无意义 pass。
     if (strength <= 0.001) {
       return false;
     }
@@ -586,16 +636,21 @@ export class HomeSceneRenderer {
       return;
     }
 
+    // 当前首页 scene 永远需要更新。
     this.renderState.scene.update(delta, elapsed, frameState);
 
+    // 只有真的进入混合区间时，next scene 才需要参与更新。
     if (this.renderState.nextScene && this.renderState.nextScene !== this.renderState.scene && this.renderState.blend > 0) {
       this.renderState.nextScene.update(delta, elapsed, frameState);
     }
 
+    // detail 只有在 overlay 打开时才更新。
     if (this.renderState.detailScene && this.renderState.detailBlend > 0) {
       this.renderState.detailScene.update(delta, elapsed, frameState);
     }
 
+    // cubes scene 可能既是当前 scene，也可能只作为 detail handoff 的数据来源。
+    // 为避免重复更新，这里只在它不等于 current/next scene 时额外更新一次。
     const cubesScene = this.renderState.cubesScene ?? this.scenes.cubes ?? null;
     if (
       cubesScene
@@ -605,6 +660,7 @@ export class HomeSceneRenderer {
       cubesScene.update(delta, elapsed, frameState);
     }
 
+    // overlayScene 使用 animate 而不是 update，是因为它更像 HUD 层而非普通场景。
     this.overlayScene?.animate?.(delta, elapsed, frameState, this.renderState);
   }
 
@@ -630,11 +686,13 @@ export class HomeSceneRenderer {
       renderHeight: this.renderTargetA.height
     };
 
+    // 先给需要预处理的 scene 一个准备机会，避免正式渲染时状态不完整。
     prepareSceneForRender(currentScene, renderer, renderSize, preparedScenes);
     prepareSceneForRender(nextScene, renderer, renderSize, preparedScenes);
     prepareSceneForRender(detailScene, renderer, renderSize, preparedScenes);
     prepareSceneForRender(cubesScene, renderer, renderSize, preparedScenes);
 
+    // -------- 分别渲染到各自离屏目标 --------
     renderer.setRenderTarget(this.renderTargetA);
     renderer.clear(true, true, true);
     renderer.render(currentScene, currentScene.camera);
@@ -651,6 +709,7 @@ export class HomeSceneRenderer {
     renderer.clear(true, true, true);
     renderer.render(cubesScene ?? currentScene, (cubesScene ?? currentScene).camera);
 
+    // -------- 根据场景 profile 做颜色校正 / 专用后处理 --------
     const currentColorState = getColorCorrectionState(currentScene);
     const nextColorState = getColorCorrectionState(nextScene ?? currentScene);
     const sceneATexture = this.applyColorCorrection(
@@ -666,6 +725,7 @@ export class HomeSceneRenderer {
       nextColorState
     );
 
+    // -------- 把多张离屏结果喂给全屏 composite shader --------
     this.compositeMaterial.uniforms.tSceneA.value = sceneATexture;
     this.compositeMaterial.uniforms.tSceneB.value = sceneBTexture;
     this.compositeMaterial.uniforms.tDetail.value = this.renderTargetDetail.texture;
@@ -675,6 +735,7 @@ export class HomeSceneRenderer {
     this.compositeMaterial.uniforms.uDetailProgress.value = detailBlend;
     this.compositeMaterial.uniforms.uDetailProgress2.value = detailSceneBlend;
     this.compositeMaterial.uniforms.uUseDetail.value = Math.max(detailBlend, detailSceneBlend);
+    // 每帧挪动蓝噪声采样位置，减少固定图样的感知。
     this.blueOffset.set(
       (this.blueOffset.x + 0.61803398875) % 1,
       (this.blueOffset.y + 0.41421356237) % 1
@@ -683,17 +744,21 @@ export class HomeSceneRenderer {
 
     const bloomState = blend > 0.5 ? nextColorState : currentColorState;
 
+    // 有 bloom 时，先把 composite 输出到中间 target，再做 bloom。
     if ((bloomState?.bloomStrength ?? 0) > 0.001) {
       renderer.setRenderTarget(this.renderTargetComposite);
       renderer.clear(true, true, true);
       renderer.render(this.compositeScene, this.compositeCamera);
       this.applyBloom(renderer, this.renderTargetComposite, previousTarget, bloomState);
     } else {
+      // 无 bloom 时直接输出到之前的目标（通常就是屏幕）。
       renderer.setRenderTarget(previousTarget);
       renderer.clear(true, true, true);
       renderer.render(this.compositeScene, this.compositeCamera);
     }
 
+    // 最终再叠加 WebGL HUD。这里关闭 autoClear 并 clearDepth，
+    // 目的是保留前面已经合成好的颜色结果，只重置深度缓冲。
     if (this.overlayScene?.scene && this.overlayScene?.camera) {
       const previousAutoClear = renderer.autoClear;
       renderer.autoClear = false;
@@ -704,6 +769,8 @@ export class HomeSceneRenderer {
   }
 
   dispose() {
+    // HomeSceneRenderer 自己创建的 render target / geometry / material
+    // 都需要在销毁时显式释放。
     this.renderTargetA.dispose();
     this.renderTargetB.dispose();
     this.renderTargetDetail.dispose();

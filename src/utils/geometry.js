@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 
+// 准备几何体以供渲染，包含中心化、缩放、对齐和法线计算等常用操作，适用于多种场景需求
 export function prepareGeometry(sourceGeometry, options = {}) {
   if (!sourceGeometry) {
     return null;

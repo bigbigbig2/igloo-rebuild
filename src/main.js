@@ -104,6 +104,7 @@ async function bootstrap() {
     audioDebugGui = new AudioDebugGui({ controller });
     await hideBootLoader();
     router.start();
+    window.controller = controller;
     window.__IGLOO_REBUILD__.audio = controller.audio;
     window.__IGLOO_REBUILD__.audioDebugGui = audioDebugGui;
   } catch (error) {

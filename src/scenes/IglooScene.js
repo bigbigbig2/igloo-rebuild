@@ -8,6 +8,7 @@ const FOG_FAR = 90;
 const SKY_COLOR_A = '#d1d6e3';
 const SKY_COLOR_B = '#afb6c7';
 const SKY_INTRO_COLOR = '#b3bac9';
+// 默认调试设置，方便在开发时调整参数，实际使用时可以通过覆盖这些值来进行微调
 const DEFAULT_IGLOO_INTRO_DEBUG_SETTINGS = Object.freeze({
   terrainRevealMaxDist: 32,
   terrainRevealNoiseStrength: 3.5,
@@ -106,6 +107,7 @@ function fadeWindow(value, fadeInStart, fadeInDuration, fadeOutStart, fadeOutDur
   return ramp(value, fadeInStart, fadeInDuration) * (1 - ramp(value, fadeOutStart, fadeOutDuration));
 }
 
+// 计算引导阶段的调试Uniform值，允许通过覆盖默认设置来微调效果
 function getIntroDebugUniformValues(overrides = {}) {
   const settings = {
     ...DEFAULT_IGLOO_INTRO_DEBUG_SETTINGS,
@@ -133,6 +135,7 @@ function getIntroDebugUniformValues(overrides = {}) {
   };
 }
 
+// 从几何体中提取动画数据，生成适用于碎片动画的结构，包括分块信息和选项纹理
 function createIglooPieceAnimationData(sourceGeometry) {
   if (
     !sourceGeometry
@@ -226,6 +229,7 @@ function createIglooPieceAnimationData(sourceGeometry) {
   };
 }
 
+// 创建地形揭示效果的ShaderMaterial，包含风吹效果、碎片震荡和基于距离的揭示动画，支持调试参数调整
 function createTerrainRevealMaterial({
   map,
   wind,
@@ -1323,20 +1327,34 @@ function createSnowField(count = 180) {
   return { geometry, basePositions, seeds };
 }
 
+/**
+ * IglooScene 是首页第一段的主场景，负责 manifesto / igloo / 雪地的完整演出。
+ *
+ * 这是 scenes 目录里最重的一个场景，既包含：
+ * - 开场 intro 时间轴
+ * - 地形与山体 reveal
+ * - igloo shell 的 piece hover / materialize 动画
+ * - 雪、烟雾、outline、cage、intro field、intro particles
+ * - manifesto 区块所需的 presentation state
+ * - Igloo 专用 color correction / bloom 配置
+ *
+ * 也就是说，它不仅是一个 Three.js scene，还是首页第一段的“导演层”。
+ */
 export class IglooScene extends SceneBase {
   constructor({ assets }) {
     super({
-      name: 'igloo',
-      background: '#c7ccd5'
+      name: "igloo",
+      background: "#c7ccd5",
     });
 
+    // -------- 运行时状态与缓存 --------
     this.assets = assets;
     this.shaderMaterials = [];
     this.mountains = [];
     this.terrainChunks = [];
     this.terrainPatches = [];
     this.smokeLayers = [];
-    this.floorBaseColor = new THREE.Color('#c1c7d2');
+    this.floorBaseColor = new THREE.Color("#c1c7d2");
     this.introProgress = 0;
     this.introElapsed = 0;
     this.introDuration = 8.2;
@@ -1386,85 +1404,116 @@ export class IglooScene extends SceneBase {
     this.debugHoverAvgDisplacement = 0;
     this.presentationState = this.computePresentationState(0);
 
+    // -------- 相机基础配置 --------
     this.camera.fov = 30;
     this.camera.far = 1020;
     this.camera.updateProjectionMatrix();
 
-    const ambient = new THREE.AmbientLight('#f3f6fb', 1.35);
-    const keyLight = new THREE.DirectionalLight('#ffffff', 1.2);
+    // -------- 灯光 --------
+    const ambient = new THREE.AmbientLight("#f3f6fb", 1.35);
+    const keyLight = new THREE.DirectionalLight("#ffffff", 1.2);
     keyLight.position.set(8, 10, 4);
-    this.fillLight = new THREE.PointLight('#dcecff', 3.4, 26, 2);
+    this.fillLight = new THREE.PointLight("#dcecff", 3.4, 26, 2);
     this.fillLight.position.set(-1.2, 1.45, 2.6);
     this.add(ambient, keyLight, this.fillLight);
 
-    const preparedIglooGeometry = prepareGeometry(assets.get('geometry', 'igloo-shell'), {
-      center: false,
-      scaleToSize: false
-    }) || new THREE.SphereGeometry(1.5, 40, 24, 0, Math.PI * 2, 0, Math.PI * 0.5);
-    const iglooPieceData = createIglooPieceAnimationData(preparedIglooGeometry);
-    const iglooGeometry = iglooPieceData.geometry ?? preparedIglooGeometry;
-    const iglooOutlineGeometry = prepareGeometry(assets.get('geometry', 'igloo-outline'), {
-      center: false,
-      scaleToSize: false,
-      recomputeNormals: false
-    });
-    const iglooCageGeometry = prepareGeometry(assets.get('geometry', 'igloo-cage'), {
-      center: false,
-      scaleToSize: false,
-      recomputeNormals: false
-    });
-    const mountainGeometry = prepareGeometry(assets.get('geometry', 'mountain'), {
-      center: false,
-      scaleToSize: false
-    });
-    const patchGeometry = prepareGeometry(assets.get('geometry', 'igloo-patch'), {
-      center: false,
-      scaleToSize: false
-    });
-    const groundGeometry = prepareGeometry(assets.get('geometry', 'ground'), {
-      center: false,
-      scaleToSize: false
-    }) || new THREE.CircleGeometry(5, 64);
-    const introParticleGeometry = assets.get('geometry', 'intro-particles')
-      ? addSeedAttribute(prepareGeometry(assets.get('geometry', 'intro-particles'), {
+    // -------- 几何与贴图资源准备 --------
+    // 这里尽量直接消费 dump 里抽出来的真实资源，只有缺资源时才回退到简单几何。
+    const preparedIglooGeometry =
+      prepareGeometry(assets.get("geometry", "igloo-shell"), {
         center: false,
         scaleToSize: false,
-        recomputeNormals: false
-      }))
+      }) ||
+      new THREE.SphereGeometry(1.5, 40, 24, 0, Math.PI * 2, 0, Math.PI * 0.5);
+    const iglooPieceData = createIglooPieceAnimationData(preparedIglooGeometry);
+    const iglooGeometry = iglooPieceData.geometry ?? preparedIglooGeometry;
+    const iglooOutlineGeometry = prepareGeometry(
+      assets.get("geometry", "igloo-outline"),
+      {
+        center: false,
+        scaleToSize: false,
+        recomputeNormals: false,
+      },
+    );
+    const iglooCageGeometry = prepareGeometry(
+      assets.get("geometry", "igloo-cage"),
+      {
+        center: false,
+        scaleToSize: false,
+        recomputeNormals: false,
+      },
+    );
+    const mountainGeometry = prepareGeometry(
+      assets.get("geometry", "mountain"),
+      {
+        center: false,
+        scaleToSize: false,
+      },
+    );
+    const patchGeometry = prepareGeometry(
+      assets.get("geometry", "igloo-patch"),
+      {
+        center: false,
+        scaleToSize: false,
+      },
+    );
+    const groundGeometry =
+      prepareGeometry(assets.get("geometry", "ground"), {
+        center: false,
+        scaleToSize: false,
+      }) || new THREE.CircleGeometry(5, 64);
+    const introParticleGeometry = assets.get("geometry", "intro-particles")
+      ? addSeedAttribute(
+          prepareGeometry(assets.get("geometry", "intro-particles"), {
+            center: false,
+            scaleToSize: false,
+            recomputeNormals: false,
+          }),
+        )
       : null;
 
-    const iglooColor = assets.get('texture', 'igloo-color');
-    const iglooExplodedColor = assets.get('texture', 'igloo-exploded-color');
-    const groundColor = assets.get('texture', 'ground-color');
-    const groundGlow = assets.get('texture', 'ground-glow');
-    const groundSansIglooColor = assets.get('texture', 'ground-sansigloo-color');
-    const mountainColor = assets.get('texture', 'mountain-color');
-    const trianglesTiling = assets.get('texture', 'triangles-tiling');
-    const mosaicNoise = assets.get('texture', 'mosaic-noise');
-    const cloudsNoise = assets.get('texture', 'clouds-noise');
-    const windNoise = assets.get('texture', 'wind-noise');
-    const shellNoise = assets.get('texture', 'detail-perlin') ?? windNoise;
+    const iglooColor = assets.get("texture", "igloo-color");
+    const iglooExplodedColor = assets.get("texture", "igloo-exploded-color");
+    const groundColor = assets.get("texture", "ground-color");
+    const groundGlow = assets.get("texture", "ground-glow");
+    const groundSansIglooColor = assets.get(
+      "texture",
+      "ground-sansigloo-color",
+    );
+    const mountainColor = assets.get("texture", "mountain-color");
+    const trianglesTiling = assets.get("texture", "triangles-tiling");
+    const mosaicNoise = assets.get("texture", "mosaic-noise");
+    const cloudsNoise = assets.get("texture", "clouds-noise");
+    const windNoise = assets.get("texture", "wind-noise");
+    const shellNoise = assets.get("texture", "detail-perlin") ?? windNoise;
     this.iglooPieces = iglooPieceData.pieces?.filter(Boolean) ?? [];
     this.iglooPieceOptionsData = iglooPieceData.optionsData ?? null;
     this.iglooPieceOptionsTexture = iglooPieceData.optionsTexture ?? null;
     this.iglooPieceTextureSize = iglooPieceData.textureSize ?? 1;
     this.usingPieceHover = Boolean(
-      this.iglooPieces.length
-      && iglooGeometry?.hasAttribute?.('aPieceId')
-      && iglooGeometry?.hasAttribute?.('centr')
-      && iglooGeometry?.hasAttribute?.('rand')
+      this.iglooPieces.length &&
+      iglooGeometry?.hasAttribute?.("aPieceId") &&
+      iglooGeometry?.hasAttribute?.("centr") &&
+      iglooGeometry?.hasAttribute?.("rand"),
     );
 
-    if (this.debugHoverLogging && typeof console !== 'undefined') {
-      console.info('[IglooScene] geometry attrs', Object.keys(iglooGeometry?.attributes ?? {}));
-      console.info('[IglooScene] piece hover setup', {
+    // -------- 场景结构搭建：天空、地面、igloo 本体、线框、山体、地形补块 --------
+    if (this.debugHoverLogging && typeof console !== "undefined") {
+      console.info(
+        "[IglooScene] geometry attrs",
+        Object.keys(iglooGeometry?.attributes ?? {}),
+      );
+      console.info("[IglooScene] piece hover setup", {
         usingPieceHover: this.usingPieceHover,
         pieceCount: this.iglooPieces.length,
-        pieceTextureSize: this.iglooPieceTextureSize
+        pieceTextureSize: this.iglooPieceTextureSize,
       });
     }
 
-    this.skyGlow = new THREE.Mesh(new THREE.SphereGeometry(160, 24, 16), createSkyMaterial());
+    this.skyGlow = new THREE.Mesh(
+      new THREE.SphereGeometry(160, 24, 16),
+      createSkyMaterial(),
+    );
     this.skyGlow.rotation.x = THREE.MathUtils.degToRad(16);
     this.skyGlow.rotation.z = THREE.MathUtils.degToRad(-16);
     this.root.add(this.skyGlow);
@@ -1479,8 +1528,8 @@ export class IglooScene extends SceneBase {
         triangles: trianglesTiling,
         noise: mosaicNoise,
         mousePosition: this.pointerWorld,
-        debugSettings: this.introDebugSettings
-      })
+        debugSettings: this.introDebugSettings,
+      }),
     );
     this.floor.renderOrder = 2;
     this.root.add(this.floor);
@@ -1495,8 +1544,8 @@ export class IglooScene extends SceneBase {
         noise: shellNoise,
         pieceOptionsTexture: this.iglooPieceOptionsTexture,
         pieceTextureSize: this.iglooPieceTextureSize,
-        usePieceAttributes: this.usingPieceHover
-      })
+        usePieceAttributes: this.usingPieceHover,
+      }),
     );
     this.dome.renderOrder = 3;
     this.root.add(this.dome);
@@ -1506,13 +1555,13 @@ export class IglooScene extends SceneBase {
       this.outline = new THREE.Mesh(
         iglooOutlineGeometry,
         new THREE.MeshBasicMaterial({
-          color: '#cfe5ff',
+          color: "#cfe5ff",
           transparent: true,
           opacity: 0.08,
           wireframe: true,
           depthWrite: false,
-          blending: THREE.AdditiveBlending
-        })
+          blending: THREE.AdditiveBlending,
+        }),
       );
       this.root.add(this.outline);
     }
@@ -1521,13 +1570,13 @@ export class IglooScene extends SceneBase {
       this.cage = new THREE.Mesh(
         iglooCageGeometry,
         new THREE.MeshBasicMaterial({
-          color: '#ddf3ff',
+          color: "#ddf3ff",
           transparent: true,
           opacity: 0.07,
           wireframe: true,
           depthWrite: false,
-          blending: THREE.AdditiveBlending
-        })
+          blending: THREE.AdditiveBlending,
+        }),
       );
       this.cage.scale.setScalar(1.025);
       this.root.add(this.cage);
@@ -1535,11 +1584,31 @@ export class IglooScene extends SceneBase {
 
     if (mountainGeometry) {
       const mountainSpecs = [
-        { position: [59.53, -1.0, -11.84], scale: [4.0, 3.14, 4.0], rotation: [0.0716, -0.7470, 0.0873] },
-        { position: [1.0, -2.21, -23.0], scale: [2.0, 2.0, 2.0], rotation: [0.0611, 0.5236, 0.0] },
-        { position: [75.0, 0.0, -90.0], scale: [8.0, 8.0, 8.0], rotation: [0.0559, -0.2915, -0.0454] },
-        { position: [250.0, 11.33, -133.0], scale: [10.0, 10.0, 10.0], rotation: [0.2304, 0.3491, 0.0873] },
-        { position: [-25.22, -1.59, -53.05], scale: [2.5, 2.5, 2.5], rotation: [0.0611, 0.4363, 0.0] }
+        {
+          position: [59.53, -1.0, -11.84],
+          scale: [4.0, 3.14, 4.0],
+          rotation: [0.0716, -0.747, 0.0873],
+        },
+        {
+          position: [1.0, -2.21, -23.0],
+          scale: [2.0, 2.0, 2.0],
+          rotation: [0.0611, 0.5236, 0.0],
+        },
+        {
+          position: [75.0, 0.0, -90.0],
+          scale: [8.0, 8.0, 8.0],
+          rotation: [0.0559, -0.2915, -0.0454],
+        },
+        {
+          position: [250.0, 11.33, -133.0],
+          scale: [10.0, 10.0, 10.0],
+          rotation: [0.2304, 0.3491, 0.0873],
+        },
+        {
+          position: [-25.22, -1.59, -53.05],
+          scale: [2.5, 2.5, 2.5],
+          rotation: [0.0611, 0.4363, 0.0],
+        },
       ];
 
       mountainSpecs.forEach((specification) => {
@@ -1549,7 +1618,7 @@ export class IglooScene extends SceneBase {
             map: mountainColor,
             triangles: trianglesTiling,
             noise: mosaicNoise,
-            debugSettings: this.introDebugSettings
+            debugSettings: this.introDebugSettings,
           }),
         );
 
@@ -1561,7 +1630,7 @@ export class IglooScene extends SceneBase {
         this.mountains.push({
           mesh,
           basePosition: mesh.position.clone(),
-          baseRotation: mesh.rotation.clone()
+          baseRotation: mesh.rotation.clone(),
         });
         this.shaderMaterials.push(mesh.material);
       });
@@ -1569,11 +1638,36 @@ export class IglooScene extends SceneBase {
 
     if (groundGeometry) {
       const terrainSpecs = [
-        { position: [-3.76, -0.58, 12.5], scale: [0.6, 0.6, 0.6], rotation: [-0.0890, 0.0, 0.0], renderOrder: 1 },
-        { position: [-17.63, -0.01, 2.0], scale: [1.0, 1.0, 1.0], rotation: [0.0471, 0.0140, 0.0], renderOrder: 3 },
-        { position: [3.12, -0.75, -1.02], scale: [1.5, 0.66, 1.5], rotation: [0.0, 0.0, 0.0], renderOrder: 1 },
-        { position: [6.0, 0.16, 15.78], scale: [1.0, 1.0, 1.0], rotation: [0.0192, 0.0, 0.1222], renderOrder: 2 },
-        { position: [16.06, 0.34, 4.0], scale: [1.0, 1.0, 1.0], rotation: [0.0, 0.0, 0.0], renderOrder: 2 }
+        {
+          position: [-3.76, -0.58, 12.5],
+          scale: [0.6, 0.6, 0.6],
+          rotation: [-0.089, 0.0, 0.0],
+          renderOrder: 1,
+        },
+        {
+          position: [-17.63, -0.01, 2.0],
+          scale: [1.0, 1.0, 1.0],
+          rotation: [0.0471, 0.014, 0.0],
+          renderOrder: 3,
+        },
+        {
+          position: [3.12, -0.75, -1.02],
+          scale: [1.5, 0.66, 1.5],
+          rotation: [0.0, 0.0, 0.0],
+          renderOrder: 1,
+        },
+        {
+          position: [6.0, 0.16, 15.78],
+          scale: [1.0, 1.0, 1.0],
+          rotation: [0.0192, 0.0, 0.1222],
+          renderOrder: 2,
+        },
+        {
+          position: [16.06, 0.34, 4.0],
+          scale: [1.0, 1.0, 1.0],
+          rotation: [0.0, 0.0, 0.0],
+          renderOrder: 2,
+        },
       ];
 
       terrainSpecs.forEach((specification) => {
@@ -1584,8 +1678,8 @@ export class IglooScene extends SceneBase {
             wind: windNoise,
             triangles: trianglesTiling,
             noise: mosaicNoise,
-            debugSettings: this.introDebugSettings
-          })
+            debugSettings: this.introDebugSettings,
+          }),
         );
 
         mesh.position.set(...specification.position);
@@ -1597,7 +1691,7 @@ export class IglooScene extends SceneBase {
           mesh,
           basePosition: mesh.position.clone(),
           baseRotation: mesh.rotation.clone(),
-          baseScale: mesh.scale.clone()
+          baseScale: mesh.scale.clone(),
         });
         this.shaderMaterials.push(mesh.material);
       });
@@ -1605,8 +1699,18 @@ export class IglooScene extends SceneBase {
 
     if (patchGeometry) {
       const patchSpecs = [
-        { position: [-9.34, -1.77, 6.96], scale: [7.0, 7.0, 7.0], rotation: [0.0, 0.0, 0.0], renderOrder: 0 },
-        { position: [-8.82, -1.35, 11.69], scale: [8.0, 8.0, 8.0], rotation: [-0.0960, -0.4468, 0.0], renderOrder: 0 }
+        {
+          position: [-9.34, -1.77, 6.96],
+          scale: [7.0, 7.0, 7.0],
+          rotation: [0.0, 0.0, 0.0],
+          renderOrder: 0,
+        },
+        {
+          position: [-8.82, -1.35, 11.69],
+          scale: [8.0, 8.0, 8.0],
+          rotation: [-0.096, -0.4468, 0.0],
+          renderOrder: 0,
+        },
       ];
 
       patchSpecs.forEach((specification) => {
@@ -1617,8 +1721,8 @@ export class IglooScene extends SceneBase {
             wind: windNoise,
             triangles: trianglesTiling,
             noise: mosaicNoise,
-            debugSettings: this.introDebugSettings
-          })
+            debugSettings: this.introDebugSettings,
+          }),
         );
 
         mesh.position.set(...specification.position);
@@ -1630,7 +1734,7 @@ export class IglooScene extends SceneBase {
           mesh,
           basePosition: mesh.position.clone(),
           baseRotation: mesh.rotation.clone(),
-          baseScale: mesh.scale.clone()
+          baseScale: mesh.scale.clone(),
         });
         this.shaderMaterials.push(mesh.material);
       });
@@ -1639,12 +1743,12 @@ export class IglooScene extends SceneBase {
     this.ring = new THREE.Mesh(
       new THREE.TorusGeometry(2.48, 0.028, 16, 96),
       new THREE.MeshBasicMaterial({
-        color: '#8ed9ff',
+        color: "#8ed9ff",
         transparent: true,
         opacity: 0.14,
         depthWrite: false,
-        blending: THREE.AdditiveBlending
-      })
+        blending: THREE.AdditiveBlending,
+      }),
     );
     this.ring.rotation.x = Math.PI * 0.5;
     this.ring.visible = false;
@@ -1658,17 +1762,30 @@ export class IglooScene extends SceneBase {
 
     if (cloudsNoise || windNoise) {
       const smokeSpecs = [
-        { position: [-5, 1.25, -10], scale: [10.8, 3.2, 1], tint: '#f6f9ff', rotationY: 0 },
-        { position: [13.45, 3, -4], scale: [11.6, 3.4, 1], tint: '#eef3ff', rotationY: THREE.MathUtils.degToRad(-10) }
+        {
+          position: [-5, 1.25, -10],
+          scale: [10.8, 3.2, 1],
+          tint: "#f6f9ff",
+          rotationY: 0,
+        },
+        {
+          position: [13.45, 3, -4],
+          scale: [11.6, 3.4, 1],
+          tint: "#eef3ff",
+          rotationY: THREE.MathUtils.degToRad(-10),
+        },
       ];
 
       smokeSpecs.forEach((specification, index) => {
         const material = createCloudMaterial({
           noise: windNoise,
           tint: specification.tint,
-          opacity: index === 0 ? 0.12 : 0.1
+          opacity: index === 0 ? 0.12 : 0.1,
         });
-        const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 1.45), material);
+        const mesh = new THREE.Mesh(
+          new THREE.PlaneGeometry(2.4, 1.45),
+          material,
+        );
         mesh.position.set(...specification.position);
         mesh.scale.set(...specification.scale);
         mesh.rotation.y = specification.rotationY;
@@ -1677,7 +1794,7 @@ export class IglooScene extends SceneBase {
         this.smokeLayers.push({
           mesh,
           basePosition: mesh.position.clone(),
-          baseScale: mesh.scale.clone()
+          baseScale: mesh.scale.clone(),
         });
         this.shaderMaterials.push(material);
       });
@@ -1687,10 +1804,10 @@ export class IglooScene extends SceneBase {
       this.introParticles = new THREE.Points(
         introParticleGeometry,
         createPointMaterial({
-          color: '#d7eeff',
+          color: "#d7eeff",
           opacity: 0.4,
-          size: 48
-        })
+          size: 48,
+        }),
       );
       this.introParticles.position.set(0, 1.2, -0.2);
       this.introParticles.renderOrder = 6;
@@ -1704,10 +1821,10 @@ export class IglooScene extends SceneBase {
     this.snowParticles = new THREE.Points(
       snowField.geometry,
       createPointMaterial({
-        color: '#f5fbff',
+        color: "#f5fbff",
         opacity: 0.24,
-        size: 42
-      })
+        size: 42,
+      }),
     );
     this.snowParticles.position.y = -0.25;
     this.snowParticles.renderOrder = 5;
@@ -1720,12 +1837,14 @@ export class IglooScene extends SceneBase {
   }
 
   applyIntroDebugUniforms() {
+    // Intro debug 配置会同步回多个材质的 uniform，
+    // 用于微调 reveal 半径、霜色强度、shockwave 宽度等参数。
     const settings = getIntroDebugUniformValues(this.introDebugSettings);
     const materials = [
       this.floor?.material ?? null,
       ...this.mountains.map(({ mesh }) => mesh.material),
       ...this.terrainChunks.map(({ mesh }) => mesh.material),
-      ...this.terrainPatches.map(({ mesh }) => mesh.material)
+      ...this.terrainPatches.map(({ mesh }) => mesh.material),
     ].filter(Boolean);
 
     materials.forEach((material) => {
@@ -1752,7 +1871,8 @@ export class IglooScene extends SceneBase {
       }
 
       if (uniforms.uTriangleShockwaveWidth) {
-        uniforms.uTriangleShockwaveWidth.value = settings.triangleShockwaveWidth;
+        uniforms.uTriangleShockwaveWidth.value =
+          settings.triangleShockwaveWidth;
       }
 
       if (uniforms.uFrostTint) {
@@ -1782,20 +1902,21 @@ export class IglooScene extends SceneBase {
   }
 
   setIntroDebugSetting(key, value) {
+    // 仅允许修改已知调试键，避免把错误参数悄悄写进场景状态。
     if (!(key in this.introDebugSettings)) {
       return;
     }
 
     const currentValue = this.introDebugSettings[key];
 
-    if (typeof currentValue === 'number') {
+    if (typeof currentValue === "number") {
       if (!Number.isFinite(value)) {
         return;
       }
 
       this.introDebugSettings[key] = value;
-    } else if (typeof currentValue === 'string') {
-      if (typeof value !== 'string' || !value.trim()) {
+    } else if (typeof currentValue === "string") {
+      if (typeof value !== "string" || !value.trim()) {
         return;
       }
 
@@ -1813,7 +1934,12 @@ export class IglooScene extends SceneBase {
   }
 
   resetIglooPieceAnimationState() {
-    if (!this.iglooPieces.length || !this.iglooPieceOptionsData || !this.iglooPieceOptionsTexture) {
+    // piece hover 动画数据存在 DataTexture 里，重播 intro 前需要全部归零。
+    if (
+      !this.iglooPieces.length ||
+      !this.iglooPieceOptionsData ||
+      !this.iglooPieceOptionsTexture
+    ) {
       this.debugHoverMaxDisplacement = 0;
       this.debugHoverAvgDisplacement = 0;
       return;
@@ -1842,6 +1968,7 @@ export class IglooScene extends SceneBase {
   }
 
   replayIntro() {
+    // 允许 MainController 在返回首页或调试时重播第一段演出。
     this.introElapsed = 0;
     this.introProgress = 0;
     this.introPlayed = false;
@@ -1851,6 +1978,8 @@ export class IglooScene extends SceneBase {
   }
 
   computePresentationState(progress = this.progress) {
+    // 这个 presentationState 并不直接控制 3D 物体，而是导出给 HUD：
+    // manifesto 面板、品牌字样、正文、法律信息等都依赖这里的 reveal 节奏。
     const exitFade = 1 - smoothWindow(progress, 0.78, 0.9);
     const introTime = Math.min(this.introElapsed, this.introDuration);
     const panelProgress = ramp(introTime, 4.45, 1.25) * exitFade;
@@ -1859,7 +1988,13 @@ export class IglooScene extends SceneBase {
     const textProgress = ramp(introTime, 4.8, 1.25) * exitFade;
     const legalProgress = ramp(introTime, 4.65, 1.05) * exitFade;
     const introParticlesPresence = 1 - ramp(introTime, 0.5, 4.0);
-    const cameraProgress = cubicBezierEase(clamp01((introTime - 2.0) / 5.5), 0.5, 0.0, 0.1, 1.0);
+    const cameraProgress = cubicBezierEase(
+      clamp01((introTime - 2.0) / 5.5),
+      0.5,
+      0.0,
+      0.1,
+      1.0,
+    );
 
     return {
       panelProgress,
@@ -1869,7 +2004,7 @@ export class IglooScene extends SceneBase {
       legalProgress,
       introParticlesProgress: introParticlesPresence,
       cameraProgress,
-      whiteoutProgress: smoothWindow(progress, 0.58, 0.92)
+      whiteoutProgress: smoothWindow(progress, 0.58, 0.92),
     };
   }
 
@@ -1878,17 +2013,19 @@ export class IglooScene extends SceneBase {
   }
 
   getColorCorrectionState() {
+    // HomeSceneRenderer 会消费这里的返回值，对 igloo section 应用 LUT 和 bloom。
     const whiteoutProgress = this.presentationState.whiteoutProgress ?? 0;
-    const bloomStrength = THREE.MathUtils.lerp(0.92, 0.72, this.introProgress)
-      * Math.max(this.introDebugSettings.bloomStrengthScale, 0)
-      * THREE.MathUtils.lerp(1, 0.9, whiteoutProgress);
+    const bloomStrength =
+      THREE.MathUtils.lerp(0.92, 0.72, this.introProgress) *
+      Math.max(this.introDebugSettings.bloomStrengthScale, 0) *
+      THREE.MathUtils.lerp(1, 0.9, whiteoutProgress);
     return {
-      profile: 'igloo',
+      profile: "igloo",
       gradientAlpha: THREE.MathUtils.lerp(0.9, 0.24, whiteoutProgress),
       lutIntensity: THREE.MathUtils.lerp(1, 0.62, whiteoutProgress),
       bloomStrength,
       bloomRadius: THREE.MathUtils.lerp(0.42, 0.28, this.introProgress),
-      bloomThreshold: THREE.MathUtils.lerp(0.76, 0.84, this.introProgress)
+      bloomThreshold: THREE.MathUtils.lerp(0.76, 0.84, this.introProgress),
     };
   }
 
@@ -1896,6 +2033,7 @@ export class IglooScene extends SceneBase {
     const wasActive = this.active;
     super.setActive(active);
 
+    // 第一次真正激活时才允许 intro 进入待播放状态。
     if (active && !wasActive && !this.introPlayed) {
       this.introElapsed = 0;
       this.introProgress = 0;
@@ -1916,6 +2054,7 @@ export class IglooScene extends SceneBase {
   }
 
   setPointer(pointer = null) {
+    // pointer 由 MainController 统一注入，用于 dome hover 与相机轻微联动。
     if (pointer && Number.isFinite(pointer.x) && Number.isFinite(pointer.y)) {
       this.pointerNdc.set(pointer.x, pointer.y);
       this.pointerActive = true;
@@ -1928,6 +2067,7 @@ export class IglooScene extends SceneBase {
   setSize(width, height) {
     super.setSize(width, height);
 
+    // 通过 zoom 轻微修正不同宽高比下的视觉比例，避免超宽屏透视过度发散。
     if (this.camera.isPerspectiveCamera) {
       this.camera.zoom = Math.min(1, (width / height) * 1.25);
       this.camera.updateProjectionMatrix();
@@ -1936,6 +2076,8 @@ export class IglooScene extends SceneBase {
 
   prepareForRender(renderer, renderState = {}) {
     void renderer;
+    // IglooScene 在真正 render 前需要知道离屏尺寸，
+    // 以便把某些依赖 gl_FragCoord 的 uniform 分辨率同步正确。
     const width = renderState.renderWidth ?? renderState.width ?? 1;
     const height = renderState.renderHeight ?? renderState.height ?? 1;
     this.introRenderReady = true;
@@ -1950,15 +2092,32 @@ export class IglooScene extends SceneBase {
   }
 
   updateIglooPieceAnimation(delta, elapsed) {
-    if (!this.iglooPieces.length || !this.iglooPieceOptionsData || !this.iglooPieceOptionsTexture) {
+    // igloo shell 的 piece hover 动画是一个独立子系统：
+    // 它会把每片碎块的 displacement / bounce / scroll 值写回 DataTexture，
+    // 再由 shell shader 在 GPU 端消费。
+    if (
+      !this.iglooPieces.length ||
+      !this.iglooPieceOptionsData ||
+      !this.iglooPieceOptionsTexture
+    ) {
       this.debugHoverMaxDisplacement = 0;
       this.debugHoverAvgDisplacement = 0;
       return;
     }
 
-    const hoverInfluence = fitRange(this.progress, 0, this.initialScrollAutocenter, 0, 1);
+    const hoverInfluence = fitRange(
+      this.progress,
+      0,
+      this.initialScrollAutocenter,
+      0,
+      1,
+    );
     const scrollEase = easeSineIn(fitRange(this.progress, 0, 0.4, 1, 0));
-    const introMotion = ramp(Math.min(this.introElapsed, this.introDuration), 2.0, 2.0);
+    const introMotion = ramp(
+      Math.min(this.introElapsed, this.introDuration),
+      2.0,
+      2.0,
+    );
 
     let maxDisplacement = 0;
     let displacementSum = 0;
@@ -1971,26 +2130,63 @@ export class IglooScene extends SceneBase {
       bounceTarget *= 0.5;
       bounceTarget *= introMotion;
 
-      const hoverModulation = Math.sin(elapsed + piece.rand.x * 12.342) * piece.rand.y;
+      const hoverModulation =
+        Math.sin(elapsed + piece.rand.x * 12.342) * piece.rand.y;
       const hoverDistance = piece.centroid.distanceTo(this.pointerWorld);
       const hoverFalloff = 1 - THREE.MathUtils.smoothstep(hoverDistance, 1, 3);
       const hoverBounce = hoverFalloff * (0.5 + 0.3 * hoverModulation);
-      bounceTarget = Math.max(bounceTarget, hoverBounce * hoverInfluence * this.hoverStrength);
+      bounceTarget = Math.max(
+        bounceTarget,
+        hoverBounce * hoverInfluence * this.hoverStrength,
+      );
 
       piece.targetBounce1 = bounceTarget;
-      piece.targetBounce2 = fpsLerp(piece.targetBounce2, piece.targetBounce1, 0.05, delta);
+      piece.targetBounce2 = fpsLerp(
+        piece.targetBounce2,
+        piece.targetBounce1,
+        0.05,
+        delta,
+      );
       piece.bounce = fpsLerp(piece.bounce, piece.targetBounce2, 0.05, delta);
 
-      const verticalMask = THREE.MathUtils.smoothstep(piece.centroid.y, 0.45, 0.7);
+      const verticalMask = THREE.MathUtils.smoothstep(
+        piece.centroid.y,
+        0.45,
+        0.7,
+      );
       piece.targetDisplacement1 = Math.max(0, piece.bounce * verticalMask);
-      piece.targetDisplacement2 = fpsLerp(piece.targetDisplacement2, piece.targetDisplacement1, 0.06, delta);
-      piece.displacement = fpsLerp(piece.displacement, piece.targetDisplacement2, 0.06, delta);
+      piece.targetDisplacement2 = fpsLerp(
+        piece.targetDisplacement2,
+        piece.targetDisplacement1,
+        0.06,
+        delta,
+      );
+      piece.displacement = fpsLerp(
+        piece.displacement,
+        piece.targetDisplacement2,
+        0.06,
+        delta,
+      );
 
-      const scrollVertical = THREE.MathUtils.smoothstep(piece.centroid.y, 0.3, 1.0);
+      const scrollVertical = THREE.MathUtils.smoothstep(
+        piece.centroid.y,
+        0.3,
+        1.0,
+      );
       const scrollRandom = fitRange(piece.rand.x, 0.4, 1, 0, 1) * 2;
       const scrollTarget = scrollEase * scrollVertical * scrollRandom;
-      piece.scrollDisplacement1 = fpsLerp(piece.scrollDisplacement1, scrollTarget, 0.075, delta);
-      piece.scrollDisplacement2 = fpsLerp(piece.scrollDisplacement2, piece.scrollDisplacement1, 0.075, delta);
+      piece.scrollDisplacement1 = fpsLerp(
+        piece.scrollDisplacement1,
+        scrollTarget,
+        0.075,
+        delta,
+      );
+      piece.scrollDisplacement2 = fpsLerp(
+        piece.scrollDisplacement2,
+        piece.scrollDisplacement1,
+        0.075,
+        delta,
+      );
       maxDisplacement = Math.max(maxDisplacement, piece.displacement);
       displacementSum += piece.displacement;
 
@@ -2002,18 +2198,20 @@ export class IglooScene extends SceneBase {
     });
 
     this.debugHoverMaxDisplacement = maxDisplacement;
-    this.debugHoverAvgDisplacement = this.iglooPieces.length > 0
-      ? displacementSum / this.iglooPieces.length
-      : 0;
+    this.debugHoverAvgDisplacement =
+      this.iglooPieces.length > 0
+        ? displacementSum / this.iglooPieces.length
+        : 0;
     this.iglooPieceOptionsTexture.needsUpdate = true;
   }
 
   updateSnowField(elapsed, strength) {
+    // 雪粒子走 CPU 端轻量更新：直接改 position attribute，构造漂浮与下落感。
     if (!this.snowParticles) {
       return;
     }
 
-    const positions = this.snowParticles.geometry.getAttribute('position');
+    const positions = this.snowParticles.geometry.getAttribute("position");
 
     for (let index = 0; index < this.snowSeeds.length; index += 1) {
       const seed = this.snowSeeds[index];
@@ -2022,17 +2220,30 @@ export class IglooScene extends SceneBase {
       const baseZ = this.snowBasePositions[index * 3 + 2];
       const fall = (elapsed * (0.16 + seed * 0.22) + seed * 9.0) % 1;
 
-      positions.array[index * 3 + 0] = baseX + Math.sin(elapsed * (0.45 + seed * 0.25) + seed * 14.0) * 0.45 * strength;
-      positions.array[index * 3 + 1] = (1 - fall) * 9.5 - 0.8 + Math.sin(elapsed * 0.6 + seed * 17.0) * 0.08;
-      positions.array[index * 3 + 2] = baseZ + Math.cos(elapsed * (0.35 + seed * 0.18) + baseY * 0.08) * 0.32 * strength;
+      positions.array[index * 3 + 0] =
+        baseX +
+        Math.sin(elapsed * (0.45 + seed * 0.25) + seed * 14.0) *
+          0.45 *
+          strength;
+      positions.array[index * 3 + 1] =
+        (1 - fall) * 9.5 - 0.8 + Math.sin(elapsed * 0.6 + seed * 17.0) * 0.08;
+      positions.array[index * 3 + 2] =
+        baseZ +
+        Math.cos(elapsed * (0.35 + seed * 0.18) + baseY * 0.08) *
+          0.32 *
+          strength;
     }
 
     positions.needsUpdate = true;
   }
 
   update(delta, elapsed) {
+    // -------- intro 时间推进 --------
     if (!this.introPlayed && this.active && this.introRenderReady) {
-      this.introElapsed = Math.min(this.introElapsed + delta, this.introDuration);
+      this.introElapsed = Math.min(
+        this.introElapsed + delta,
+        this.introDuration,
+      );
       const rawIntro = clamp01(this.introElapsed / this.introDuration);
       this.introProgress = rawIntro * rawIntro * (3 - 2 * rawIntro);
 
@@ -2042,6 +2253,7 @@ export class IglooScene extends SceneBase {
       }
     }
 
+    // -------- 从当前 progress / introTime 推导全局展示状态 --------
     const presentation = this.computePresentationState(this.progress);
     this.presentationState = presentation;
 
@@ -2052,11 +2264,35 @@ export class IglooScene extends SceneBase {
     const timelineWeight = smoothWindow(this.progress, 0.14, 1);
     const whiteoutProgress = smoothWindow(this.progress, 0.56, 0.9);
     const introTime = Math.min(this.introElapsed, this.introDuration);
-    const introCameraBlend = cubicBezierEase(clamp01((introTime - 2.0) / 5.5), 0.5, 0.0, 0.1, 1.0);
-    const introTerrainProgress = cubicBezierEase(clamp01((introTime - 0.7) / 7.5), 0.5, 0.0, 0.1, 1.0);
-    const introTerrainProgress2 = cubicBezierEase(clamp01((introTime - 0.7) / 7.5), 0.6, 0.0, 0.0, 1.0);
+    const introCameraBlend = cubicBezierEase(
+      clamp01((introTime - 2.0) / 5.5),
+      0.5,
+      0.0,
+      0.1,
+      1.0,
+    );
+    const introTerrainProgress = cubicBezierEase(
+      clamp01((introTime - 0.7) / 7.5),
+      0.5,
+      0.0,
+      0.1,
+      1.0,
+    );
+    const introTerrainProgress2 = cubicBezierEase(
+      clamp01((introTime - 0.7) / 7.5),
+      0.6,
+      0.0,
+      0.0,
+      1.0,
+    );
     const introShellProgress = timedEase(introTime, 1.0, 1.0, easePower2InOut);
-    const introMaterialize = cubicBezierEase(clamp01((introTime - 1.1) / 2.25), 0.662, 0.073, 0.047, 1.0);
+    const introMaterialize = cubicBezierEase(
+      clamp01((introTime - 1.1) / 2.25),
+      0.662,
+      0.073,
+      0.047,
+      1.0,
+    );
     const introGroundAlpha = ramp(introTime, 1.15, 1.0);
     const introMountainAlpha = timedEase(introTime, 0.7, 3.0, easePower2InOut);
     const introSmokeAlpha = timedEase(introTime, 2.0, 3.0, easePower2InOut);
@@ -2067,18 +2303,33 @@ export class IglooScene extends SceneBase {
     const introFieldPresence = 0;
     const introParticlesAlpha = fadeWindow(introTime, 0.5, 0.6, 1.75, 2.0);
 
+    // -------- 指针驱动：hover 与相机轻微漂移 --------
     if (this.pointerActive) {
       this.pointerDriftTarget.copy(this.pointerNdc);
       this.pointerRaycaster.setFromCamera(this.pointerNdc, this.camera);
       this.camera.getWorldDirection(this._pointerPlaneForward);
-      this._pointerPlanePoint.copy(this.camera.position).addScaledVector(this._pointerPlaneForward, this.pointerProbeDistance);
-      this.pointerPlane.setFromNormalAndCoplanarPoint(this._pointerPlaneForward, this._pointerPlanePoint);
+      this._pointerPlanePoint
+        .copy(this.camera.position)
+        .addScaledVector(this._pointerPlaneForward, this.pointerProbeDistance);
+      this.pointerPlane.setFromNormalAndCoplanarPoint(
+        this._pointerPlaneForward,
+        this._pointerPlanePoint,
+      );
 
-      if (this.pointerRaycaster.ray.intersectPlane(this.pointerPlane, this.pointerIntersection)) {
+      if (
+        this.pointerRaycaster.ray.intersectPlane(
+          this.pointerPlane,
+          this.pointerIntersection,
+        )
+      ) {
         this.pointerTarget.copy(this.pointerIntersection);
       } else {
-        this.pointerTarget.copy(this.pointerRaycaster.ray.origin)
-          .addScaledVector(this.pointerRaycaster.ray.direction, this.pointerProbeDistance);
+        this.pointerTarget
+          .copy(this.pointerRaycaster.ray.origin)
+          .addScaledVector(
+            this.pointerRaycaster.ray.direction,
+            this.pointerProbeDistance,
+          );
       }
 
       const hoverHits = this.pointerRaycaster.intersectObject(this.dome, false);
@@ -2100,69 +2351,87 @@ export class IglooScene extends SceneBase {
     this.pointerDrift.lerp(this.pointerDriftTarget, 1 - Math.exp(-delta * 6));
     this.pointerWorld.lerp(this.pointerTarget, 1 - Math.exp(-delta * 4));
     this.hoverPoint.lerp(this.hoverPointTarget, 1 - Math.exp(-delta * 9));
-    this.hoverStrength = THREE.MathUtils.lerp(this.hoverStrength, this.hoverStrengthTarget, 1 - Math.exp(-delta * 10));
+    this.hoverStrength = THREE.MathUtils.lerp(
+      this.hoverStrength,
+      this.hoverStrengthTarget,
+      1 - Math.exp(-delta * 10),
+    );
     this.hoverDelta.copy(this.hoverPoint).sub(this.hoverPointPrevious);
-    const hoverVelocityTarget = clamp01(this.hoverDelta.length() / Math.max(delta, 1e-4) / 10) * this.hoverStrengthTarget;
-    this.hoverVelocity = THREE.MathUtils.lerp(this.hoverVelocity, hoverVelocityTarget, 1 - Math.exp(-delta * 12));
+    const hoverVelocityTarget =
+      clamp01(this.hoverDelta.length() / Math.max(delta, 1e-4) / 10) *
+      this.hoverStrengthTarget;
+    this.hoverVelocity = THREE.MathUtils.lerp(
+      this.hoverVelocity,
+      hoverVelocityTarget,
+      1 - Math.exp(-delta * 12),
+    );
     this.hoverPointPrevious.copy(this.hoverPoint);
     this.updateIglooPieceAnimation(delta, elapsed);
 
     if (
-      this.debugHoverLogging
-      && this.pointerActive
-      && elapsed - this.debugHoverLastLogTime > 0.6
-      && typeof console !== 'undefined'
+      this.debugHoverLogging &&
+      this.pointerActive &&
+      elapsed - this.debugHoverLastLogTime > 0.6 &&
+      typeof console !== "undefined"
     ) {
       this.debugHoverLastLogTime = elapsed;
-      console.info('[IglooScene hover]', {
+      console.info("[IglooScene hover]", {
         usingPieceHover: this.usingPieceHover,
         pieceCount: this.iglooPieces.length,
         pointerNdc: {
           x: Number(this.pointerNdc.x.toFixed(3)),
-          y: Number(this.pointerNdc.y.toFixed(3))
+          y: Number(this.pointerNdc.y.toFixed(3)),
         },
         pointerWorld: {
           x: Number(this.pointerWorld.x.toFixed(3)),
           y: Number(this.pointerWorld.y.toFixed(3)),
-          z: Number(this.pointerWorld.z.toFixed(3))
+          z: Number(this.pointerWorld.z.toFixed(3)),
         },
         hoverPoint: {
           x: Number(this.hoverPoint.x.toFixed(3)),
           y: Number(this.hoverPoint.y.toFixed(3)),
-          z: Number(this.hoverPoint.z.toFixed(3))
+          z: Number(this.hoverPoint.z.toFixed(3)),
         },
         hoverStrength: Number(this.hoverStrength.toFixed(3)),
         hoverVelocity: Number(this.hoverVelocity.toFixed(3)),
         maxDisplacement: Number(this.debugHoverMaxDisplacement.toFixed(4)),
-        avgDisplacement: Number(this.debugHoverAvgDisplacement.toFixed(4))
+        avgDisplacement: Number(this.debugHoverAvgDisplacement.toFixed(4)),
       });
     }
 
+    // -------- 主体与辅助层动画更新 --------
     this.root.rotation.y = 0;
     this.dome.rotation.y = 0;
     this.dome.position.y = 0;
     this.dome.visible = sectionPresence > 0.001;
-    this.dome.material.uniforms.uDisplacementMix.value = (1 - introMaterialize) * 0.6;
+    this.dome.material.uniforms.uDisplacementMix.value =
+      (1 - introMaterialize) * 0.6;
     this.dome.material.uniforms.uProgress.value = introShellProgress;
     this.dome.material.uniforms.uIntroMaterialize.value = introMaterialize;
-    this.dome.material.uniforms.uIntroGlow.value = THREE.MathUtils.lerp(0.9, 0.66, introMaterialize)
-      * Math.max(this.introDebugSettings.iglooGlowStrength, 0);
+    this.dome.material.uniforms.uIntroGlow.value =
+      THREE.MathUtils.lerp(0.9, 0.66, introMaterialize) *
+      Math.max(this.introDebugSettings.iglooGlowStrength, 0);
     this.dome.material.uniforms.uHoverPoint.value.copy(this.hoverPoint);
-    this.dome.material.uniforms.uHoverStrength.value = this.hoverStrength * sectionPresence;
+    this.dome.material.uniforms.uHoverStrength.value =
+      this.hoverStrength * sectionPresence;
     this.dome.material.uniforms.uHoverVelocity.value = this.hoverVelocity;
     this.dome.material.uniforms.uAlpha.value = sectionPresence;
     this.floor.material.uniforms.uMousePos.value.copy(this.pointerWorld);
     this.floor.material.uniforms.uProgress.value = introTerrainProgress;
     this.floor.material.uniforms.uProgress2.value = introTerrainProgress2;
-    this.floor.material.uniforms.uAlpha.value = sectionPresence * introGroundAlpha;
-    this.fillLight.intensity = THREE.MathUtils.lerp(3.4, 2.25, this.progress)
-      * Math.max(this.introDebugSettings.iglooGlowStrength, 0);
+    this.floor.material.uniforms.uAlpha.value =
+      sectionPresence * introGroundAlpha;
+    this.fillLight.intensity =
+      THREE.MathUtils.lerp(3.4, 2.25, this.progress) *
+      Math.max(this.introDebugSettings.iglooGlowStrength, 0);
 
     if (this.outline) {
       this.outline.rotation.y = 0;
       this.outline.position.y = this.dome.position.y + 0.03;
       this.outline.scale.setScalar(1.0 + introPresence * 0.015);
-      this.outline.material.opacity = sectionPresence * Math.max(introOutlinePresence * 0.22, (1 - introMaterialize) * 0.16);
+      this.outline.material.opacity =
+        sectionPresence *
+        Math.max(introOutlinePresence * 0.22, (1 - introMaterialize) * 0.16);
       this.outline.visible = this.outline.material.opacity > 0.001;
     }
 
@@ -2179,15 +2448,22 @@ export class IglooScene extends SceneBase {
     }
 
     if (this.introField) {
-      this.introField.group.visible = introFieldPresence * sectionPresence > 0.001;
-      this.introField.group.rotation.y = 0.04 + introFieldPresence * 0.08 + elapsed * 0.01;
+      this.introField.group.visible =
+        introFieldPresence * sectionPresence > 0.001;
+      this.introField.group.rotation.y =
+        0.04 + introFieldPresence * 0.08 + elapsed * 0.01;
       this.introField.group.position.y = 1.2 + introFieldPresence * 0.1;
       this.introField.group.scale.setScalar(0.92 + introFieldPresence * 0.02);
-      this.introField.lineMesh.material.opacity = introFieldPresence * sectionPresence * 0.075;
-      this.introField.pointMesh.material.uniforms.uAlpha.value = introFieldPresence * sectionPresence * 0.055;
-      this.introField.pointMesh.material.uniforms.uJitter.value = THREE.MathUtils.lerp(0.12, 0.04, introMaterialize);
-      this.introField.groundRing.material.opacity = introFieldPresence * sectionPresence * 0.028;
-      this.introField.outerRing.material.opacity = introFieldPresence * sectionPresence * 0.016;
+      this.introField.lineMesh.material.opacity =
+        introFieldPresence * sectionPresence * 0.075;
+      this.introField.pointMesh.material.uniforms.uAlpha.value =
+        introFieldPresence * sectionPresence * 0.055;
+      this.introField.pointMesh.material.uniforms.uJitter.value =
+        THREE.MathUtils.lerp(0.12, 0.04, introMaterialize);
+      this.introField.groundRing.material.opacity =
+        introFieldPresence * sectionPresence * 0.028;
+      this.introField.outerRing.material.opacity =
+        introFieldPresence * sectionPresence * 0.016;
     }
 
     this.shaderMaterials.forEach((material, index) => {
@@ -2201,13 +2477,10 @@ export class IglooScene extends SceneBase {
     });
 
     this.mountains.forEach(({ mesh, basePosition }, index) => {
-      mesh.position.set(
-        basePosition.x,
-        basePosition.y,
-        basePosition.z
-      );
+      mesh.position.set(basePosition.x, basePosition.y, basePosition.z);
       if (mesh.material.uniforms.uAlpha) {
-        mesh.material.uniforms.uAlpha.value = sectionPresence * introMountainAlpha;
+        mesh.material.uniforms.uAlpha.value =
+          sectionPresence * introMountainAlpha;
       }
       if (mesh.material.uniforms.uProgress) {
         mesh.material.uniforms.uProgress.value = introTerrainProgress;
@@ -2217,63 +2490,61 @@ export class IglooScene extends SceneBase {
       }
     });
 
-    this.terrainChunks.forEach(({ mesh, basePosition, baseRotation }, index) => {
-      mesh.position.set(
-        basePosition.x,
-        basePosition.y,
-        basePosition.z
-      );
-      mesh.rotation.set(
-        baseRotation.x,
-        baseRotation.y,
-        baseRotation.z
-      );
-      mesh.material.uniforms.uAlpha.value = sectionPresence * introGroundAlpha;
-      mesh.material.uniforms.uProgress.value = introTerrainProgress;
-      mesh.material.uniforms.uProgress2.value = introTerrainProgress2;
-      mesh.material.uniforms.uTriangleAlpha.value = 1;
-    });
+    this.terrainChunks.forEach(
+      ({ mesh, basePosition, baseRotation }, index) => {
+        mesh.position.set(basePosition.x, basePosition.y, basePosition.z);
+        mesh.rotation.set(baseRotation.x, baseRotation.y, baseRotation.z);
+        mesh.material.uniforms.uAlpha.value =
+          sectionPresence * introGroundAlpha;
+        mesh.material.uniforms.uProgress.value = introTerrainProgress;
+        mesh.material.uniforms.uProgress2.value = introTerrainProgress2;
+        mesh.material.uniforms.uTriangleAlpha.value = 1;
+      },
+    );
 
-    this.terrainPatches.forEach(({ mesh, basePosition, baseRotation }, index) => {
-      mesh.position.set(
-        basePosition.x,
-        basePosition.y,
-        basePosition.z
-      );
-      mesh.rotation.set(
-        baseRotation.x,
-        baseRotation.y,
-        baseRotation.z
-      );
-      mesh.material.uniforms.uAlpha.value = sectionPresence * introGroundAlpha;
-      mesh.material.uniforms.uProgress.value = introTerrainProgress;
-      mesh.material.uniforms.uProgress2.value = introTerrainProgress2;
-      mesh.material.uniforms.uTriangleAlpha.value = 1;
-    });
+    this.terrainPatches.forEach(
+      ({ mesh, basePosition, baseRotation }, index) => {
+        mesh.position.set(basePosition.x, basePosition.y, basePosition.z);
+        mesh.rotation.set(baseRotation.x, baseRotation.y, baseRotation.z);
+        mesh.material.uniforms.uAlpha.value =
+          sectionPresence * introGroundAlpha;
+        mesh.material.uniforms.uProgress.value = introTerrainProgress;
+        mesh.material.uniforms.uProgress2.value = introTerrainProgress2;
+        mesh.material.uniforms.uTriangleAlpha.value = 1;
+      },
+    );
 
     this.smokeLayers.forEach(({ mesh, basePosition, baseScale }, index) => {
       mesh.position.copy(basePosition);
       mesh.scale.set(
         baseScale.x * (1 + whiteoutProgress * 1.35),
         baseScale.y * (1 + whiteoutProgress * 0.82),
-        baseScale.z
+        baseScale.z,
       );
-      mesh.material.uniforms.uOpacity.value = smokePresence
-        * introSmokeAlpha
-        * ((index === 0 ? 0.12 : 0.1) + whiteoutProgress * (index === 0 ? 0.3 : 0.24));
+      mesh.material.uniforms.uOpacity.value =
+        smokePresence *
+        introSmokeAlpha *
+        ((index === 0 ? 0.12 : 0.1) +
+          whiteoutProgress * (index === 0 ? 0.3 : 0.24));
     });
 
     if (this.introParticles) {
       this.introParticles.rotation.y = elapsed * 0.04;
       this.introParticles.position.y = 1.2 + Math.sin(elapsed * 0.3) * 0.08;
-      this.introParticles.material.uniforms.uAlpha.value = introParticlesAlpha * sectionPresence * 0.26;
-      this.introParticles.material.uniforms.uJitter.value = THREE.MathUtils.lerp(0.85, 0.18, this.progress);
+      this.introParticles.material.uniforms.uAlpha.value =
+        introParticlesAlpha * sectionPresence * 0.26;
+      this.introParticles.material.uniforms.uJitter.value =
+        THREE.MathUtils.lerp(0.85, 0.18, this.progress);
     }
 
     if (this.snowParticles) {
-      this.snowParticles.material.uniforms.uAlpha.value = snowPresence * introSnowAlpha * 0.2;
+      this.snowParticles.material.uniforms.uAlpha.value =
+        snowPresence * introSnowAlpha * 0.2;
       this.snowParticles.material.uniforms.uJitter.value = 0.35;
-      this.updateSnowField(elapsed, THREE.MathUtils.lerp(0.35, 1, snowPresence * introSnowAlpha));
+      this.updateSnowField(
+        elapsed,
+        THREE.MathUtils.lerp(0.35, 1, snowPresence * introSnowAlpha),
+      );
     }
 
     if (this.skyGlow) {
@@ -2281,46 +2552,66 @@ export class IglooScene extends SceneBase {
       this.skyGlow.scale.setScalar(1);
     }
 
+    // -------- 相机轨迹：先走 intro path，再并入 section timeline --------
     this._cameraPositionA.lerpVectors(
       this.introCameraPosition,
       this.timelineStartCameraPosition,
-      introCameraBlend
+      introCameraBlend,
     );
     this._cameraPositionB.lerpVectors(
       this._cameraPositionA,
       this.timelineEndCameraPosition,
-      timelineWeight
+      timelineWeight,
     );
 
     this._cameraTargetA.lerpVectors(
       this.introCameraTarget,
       this.timelineStartCameraTarget,
-      introCameraBlend
+      introCameraBlend,
     );
-    this._cameraTargetB.copy(this._cameraTargetA).lerp(this.timelineEndCameraTarget, timelineWeight);
+    this._cameraTargetB
+      .copy(this._cameraTargetA)
+      .lerp(this.timelineEndCameraTarget, timelineWeight);
 
     const cameraHoverAmount = introCameraBlend * sectionPresence;
     const horizontalAngle = this.pointerDrift.x * 0.07 * cameraHoverAmount;
     const verticalAngle = -this.pointerDrift.y * 0.025 * cameraHoverAmount;
 
-    this._cameraViewDirection.copy(this._cameraPositionB).sub(this._cameraTargetB);
+    this._cameraViewDirection
+      .copy(this._cameraPositionB)
+      .sub(this._cameraTargetB);
 
     if (this._cameraViewDirection.lengthSq() > 1e-6) {
-      this._cameraRight.crossVectors(this._worldUp, this._cameraViewDirection).normalize();
+      this._cameraRight
+        .crossVectors(this._worldUp, this._cameraViewDirection)
+        .normalize();
 
       if (this._cameraRight.lengthSq() < 1e-6) {
         this._cameraRight.set(1, 0, 0);
       }
 
-      this._cameraUpOrtho.crossVectors(this._cameraViewDirection, this._cameraRight).normalize();
-      this._cameraViewOffset.copy(this._cameraPositionB).sub(this._cameraTargetB);
+      this._cameraUpOrtho
+        .crossVectors(this._cameraViewDirection, this._cameraRight)
+        .normalize();
+      this._cameraViewOffset
+        .copy(this._cameraPositionB)
+        .sub(this._cameraTargetB);
       this._cameraViewOffset.applyAxisAngle(this._cameraRight, verticalAngle);
-      this._cameraViewOffset.applyAxisAngle(this._cameraUpOrtho, horizontalAngle);
-      this.camera.position.copy(this._cameraTargetB).add(this._cameraViewOffset);
+      this._cameraViewOffset.applyAxisAngle(
+        this._cameraUpOrtho,
+        horizontalAngle,
+      );
+      this.camera.position
+        .copy(this._cameraTargetB)
+        .add(this._cameraViewOffset);
     } else {
       this.camera.position.copy(this._cameraPositionB);
     }
 
-    this.camera.lookAt(this._cameraTargetB.x, this._cameraTargetB.y, this._cameraTargetB.z);
+    this.camera.lookAt(
+      this._cameraTargetB.x,
+      this._cameraTargetB.y,
+      this._cameraTargetB.z,
+    );
   }
 }
