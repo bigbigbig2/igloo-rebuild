@@ -1,6 +1,6 @@
 import { clamp, damp } from '../utils/math.js';
 
-const LOOP_TRACK_KEYS = ['music-bg', 'room-bg'];
+const LOOP_TRACK_KEYS = ['music-bg', 'room-bg', 'shard'];
 
 const TRACK_DEFAULTS = {
   'music-bg': {
@@ -11,6 +11,10 @@ const TRACK_DEFAULTS = {
     type: 'loop',
     volume: 0.45
   },
+  shard: {
+    type: 'loop',
+    volume: 0.18
+  },
   manifesto: {
     type: 'one-shot',
     volume: 0.3
@@ -18,6 +22,30 @@ const TRACK_DEFAULTS = {
   'click-project': {
     type: 'one-shot',
     volume: 0.5
+  },
+  'enter-project': {
+    type: 'one-shot',
+    volume: 0.28
+  },
+  'leave-project': {
+    type: 'one-shot',
+    volume: 0.24
+  },
+  beeps: {
+    type: 'one-shot',
+    volume: 0.18
+  },
+  beeps2: {
+    type: 'one-shot',
+    volume: 0.18
+  },
+  beeps3: {
+    type: 'one-shot',
+    volume: 0.18
+  },
+  'project-text': {
+    type: 'one-shot',
+    volume: 0.22
   }
 };
 

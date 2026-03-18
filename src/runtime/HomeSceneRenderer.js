@@ -25,6 +25,8 @@ const COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
   uniform vec2 uResolution;
   uniform vec2 uBlueOffset;
   uniform float uMix;
+  uniform float uHomeChromaticStrength;
+  uniform float uHomeEdgeSoftness;
   uniform float uProgressVel;
   uniform float uDetailProgress;
   uniform float uDetailProgress2;
@@ -35,6 +37,21 @@ const COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
   float fit(float value, float minA, float maxA, float minB, float maxB) {
     float normalized = clamp((value - minA) / max(maxA - minA, 0.0001), 0.0, 1.0);
     return mix(minB, maxB, normalized);
+  }
+
+  float cubicIn(float value) {
+    return value * value * value;
+  }
+
+  float linstep(float begin, float end, float value) {
+    return clamp((value - begin) / (end - begin), 0.0, 1.0);
+  }
+
+  float falloff(float value, float start, float end, float margin, float progress) {
+    float direction = sign(end - start);
+    float offset = margin * direction;
+    float pivot = mix(start - offset, end, clamp(progress, 0.0, 1.0));
+    return linstep(pivot + offset, pivot, value);
   }
 
   vec4 getBlueNoise(vec2 fragCoord, vec2 offset) {
@@ -75,28 +92,64 @@ const COMPOSITE_FRAGMENT_SHADER = /* glsl */ `
     float inclination = mix(1.0 - vUv.x + slopeDisplacement, vUv.x + slopeDisplacement, step(slope, 0.0));
     float cutProgress = fit(uMix, 0.0, 1.0, 0.0, 1.0 + abs(slope));
     float diagonalValue = vUv.y + inclination * abs(slope);
-    float cutBlur = smoothstep(cutProgress - 0.18, cutProgress + 0.18, diagonalValue);
-    float techDisplacement = smoothstep(cutBlur - 0.12, cutBlur + 0.12, scrollData.g);
-    float cut = smoothstep(cutBlur - 0.04, cutBlur + 0.04, scrollData.r);
+    float edgeSoftness = max(uHomeEdgeSoftness, 0.05);
+    float cutDiagonalBlur = falloff(
+      diagonalValue,
+      0.0,
+      1.0,
+      2.0 * edgeSoftness,
+      cutProgress
+    );
+    float cutDiagonalDisplacement = falloff(
+      diagonalValue,
+      0.0,
+      1.0,
+      0.9 * edgeSoftness,
+      cutProgress
+    );
+    float techDisplacement = falloff(
+      scrollData.g,
+      0.0,
+      1.0,
+      1.0 * edgeSoftness,
+      cutDiagonalDisplacement
+    );
+    float cutDiagonal = falloff(
+      diagonalValue,
+      0.0,
+      1.0,
+      0.2 * edgeSoftness,
+      cutProgress
+    );
+    float cut = falloff(scrollData.r, 0.0, 1.0, 2.0 * edgeSoftness, cutDiagonal);
 
     float modulator = 12.0
+      * uHomeChromaticStrength
       * smoothstep(1.0, 0.7, abs(vUv.x * 2.0 - 1.0))
       * smoothstep(1.0, 0.7, abs(vUv.y * 2.0 - 1.0));
     vec4 noise = getBlueNoise(gl_FragCoord.xy, uBlueOffset);
     float velocityBoost = 0.65 + uProgressVel * 2.4;
-    vec2 sceneADisplacement = vec2(0.0, 0.4 * uMix + 0.025 * techDisplacement * velocityBoost);
-    vec2 sceneBDisplacement = vec2(0.0, 0.4 * (1.0 - uMix) + 0.025 * (1.0 - techDisplacement) * velocityBoost);
+    vec2 sceneADisplacement = vec2(
+      0.0,
+      0.4 * cubicIn(clamp(uMix, 0.0, 1.0))
+        + 0.025 * techDisplacement * velocityBoost
+    );
+    vec2 sceneBDisplacement = vec2(
+      0.0,
+      0.4 * cubicIn(clamp(1.0 - uMix, 0.0, 1.0))
+        + 0.025 * (1.0 - techDisplacement) * velocityBoost
+    );
     vec3 sceneA = chromaticAberration(
       tSceneA,
       vUv - sceneADisplacement,
       modulator,
-      cutBlur * noise.r
+      cutDiagonalBlur * noise.r
     ).rgb;
     vec3 sceneB = chromaticAberration(
       tSceneB,
       vUv + sceneBDisplacement,
       modulator,
-      (1.0 - cutBlur) * noise.g
+      (1.0 - cutDiagonalBlur) * noise.g
     ).rgb;
 
     return clamp(mix(sceneA, sceneB, cut), 0.0, 1.0);
@@ -356,6 +409,16 @@ const ENTRY_POST_FRAGMENT_SHADER = /* glsl */ `
   }
 `;
 
+const DEFAULT_TRANSITION_DEBUG_SETTINGS = Object.freeze({
+  homeChromaticStrength: 0.58,
+  homeEdgeSoftness: 1,
+  iglooToCubesBloomScale: 0.04,
+  iglooToCubesBloomThreshold: 0.96,
+  iglooToCubesBloomRadius: 0.18,
+  iglooToCubesBlendStart: 0.02,
+  iglooToCubesBlendEnd: 0.38
+});
+
 function createRenderTarget(width, height) {
   // 所有离屏目标统一使用 sRGB 颜色空间，避免合成时颜色不一致。
   const target = new THREE.WebGLRenderTarget(width, height, {
@@ -398,6 +461,13 @@ function getColorCorrectionState(scene) {
     };
   }
 
+  if (scene.name === 'cubes') {
+    return {
+      profile: 'cubes',
+      lutIntensity: 1
+    };
+  }
+
   return null;
 }
 
@@ -432,8 +502,10 @@ export class HomeSceneRenderer {
     // blueOffset 持续变化，用来让蓝噪声采样每帧略微偏移，减少静态噪点感。
     this.blueOffset = new THREE.Vector2(0, 0);
     this.iglooSceneLut = this.assets?.get('texture', 'igloo-scene-lut') ?? null;
+    this.cubesSceneLut = this.assets?.get('texture', 'cube-scene') ?? null;
     this.overlayScene = null;
     this.elapsed = 0;
+    this.transitionDebugSettings = { ...DEFAULT_TRANSITION_DEBUG_SETTINGS };
 
     // -------- 全屏合成 pass --------
     this.compositeScene = new THREE.Scene();
@@ -450,6 +522,12 @@ export class HomeSceneRenderer {
         uResolution: { value: new THREE.Vector2(1, 1) },
         uBlueOffset: { value: this.blueOffset.clone() },
         uMix: { value: 0 },
+        uHomeChromaticStrength: {
+          value: this.transitionDebugSettings.homeChromaticStrength
+        },
+        uHomeEdgeSoftness: {
+          value: this.transitionDebugSettings.homeEdgeSoftness
+        },
         uProgressVel: { value: 0 },
         uDetailProgress: { value: 0 },
         uDetailProgress2: { value: 0 },
@@ -519,6 +597,35 @@ export class HomeSceneRenderer {
     this.renderTargetPostEntry = createRenderTarget(1, 1);
     this.renderTargetComposite = createRenderTarget(1, 1);
     this.bloomPass = new UnrealBloomPass(new THREE.Vector2(1, 1), 1, 0.35, 0.8);
+  }
+
+  getTransitionDebugSettings() {
+    return { ...this.transitionDebugSettings };
+  }
+
+  setTransitionDebugSetting(key, value) {
+    if (!(key in this.transitionDebugSettings) || !Number.isFinite(value)) {
+      return;
+    }
+
+    this.transitionDebugSettings[key] = value;
+
+    if (key === 'homeChromaticStrength') {
+      this.compositeMaterial.uniforms.uHomeChromaticStrength.value = value;
+      return;
+    }
+
+    if (key === 'homeEdgeSoftness') {
+      this.compositeMaterial.uniforms.uHomeEdgeSoftness.value = value;
+    }
+  }
+
+  resetTransitionDebugSettings() {
+    this.transitionDebugSettings = { ...DEFAULT_TRANSITION_DEBUG_SETTINGS };
+    this.compositeMaterial.uniforms.uHomeChromaticStrength.value =
+      this.transitionDebugSettings.homeChromaticStrength;
+    this.compositeMaterial.uniforms.uHomeEdgeSoftness.value =
+      this.transitionDebugSettings.homeEdgeSoftness;
   }
 
   setActive(active) {
@@ -592,19 +699,27 @@ export class HomeSceneRenderer {
     }
 
     // 非 igloo profile：直接返回原始贴图，不额外处理。
+    const lutTexture = colorCorrectionState?.profile === 'igloo'
+      ? this.iglooSceneLut
+      : colorCorrectionState?.profile === 'cubes'
+        ? this.cubesSceneLut
+        : null;
+
     if (
-      colorCorrectionState?.profile !== 'igloo'
-      || !this.iglooSceneLut?.isData3DTexture
+      (colorCorrectionState?.profile !== 'igloo' && colorCorrectionState?.profile !== 'cubes')
+      || !lutTexture?.isData3DTexture
     ) {
       return sourceTarget.texture;
     }
 
-    // Igloo profile：通过 3D LUT 与梯度控制做色彩风格化。
+    // Igloo / Cubes profile：通过 3D LUT 做 section 专属的色彩风格化。
     this.lutMaterial.uniforms.tDiffuse.value = sourceTarget.texture;
-    this.lutMaterial.uniforms.tLUT.value = this.iglooSceneLut;
-    this.lutMaterial.uniforms.uLUTSize.value = this.iglooSceneLut.image?.width ?? 1;
+    this.lutMaterial.uniforms.tLUT.value = lutTexture;
+    this.lutMaterial.uniforms.uLUTSize.value = lutTexture.image?.width ?? 1;
     this.lutMaterial.uniforms.uLUTIntensity.value = colorCorrectionState.lutIntensity ?? 1;
-    this.lutMaterial.uniforms.uGradientAlpha.value = colorCorrectionState.gradientAlpha ?? 1;
+    this.lutMaterial.uniforms.uGradientAlpha.value = colorCorrectionState.profile === 'igloo'
+      ? (colorCorrectionState.gradientAlpha ?? 1)
+      : 1;
 
     renderer.setRenderTarget(destinationTarget);
     renderer.clear(true, true, true);
@@ -742,7 +857,40 @@ export class HomeSceneRenderer {
     );
     this.compositeMaterial.uniforms.uBlueOffset.value.copy(this.blueOffset);
 
-    const bloomState = blend > 0.5 ? nextColorState : currentColorState;
+    let bloomState = blend > 0.5 ? nextColorState : currentColorState;
+    const iglooToCubesBlend =
+      currentScene?.name === 'igloo' &&
+      nextScene?.name === 'cubes' &&
+      blend < 0.5
+        ? THREE.MathUtils.smoothstep(
+            blend,
+            this.transitionDebugSettings.iglooToCubesBlendStart,
+            this.transitionDebugSettings.iglooToCubesBlendEnd
+          )
+        : 0;
+
+    if ((bloomState?.bloomStrength ?? 0) > 0.001 && iglooToCubesBlend > 0) {
+      bloomState = {
+        ...bloomState,
+        bloomStrength:
+          (bloomState?.bloomStrength ?? 0) *
+          THREE.MathUtils.lerp(
+            1,
+            this.transitionDebugSettings.iglooToCubesBloomScale,
+            iglooToCubesBlend
+          ),
+        bloomRadius: THREE.MathUtils.lerp(
+          bloomState?.bloomRadius ?? 0.35,
+          this.transitionDebugSettings.iglooToCubesBloomRadius,
+          iglooToCubesBlend
+        ),
+        bloomThreshold: THREE.MathUtils.lerp(
+          bloomState?.bloomThreshold ?? 0.8,
+          this.transitionDebugSettings.iglooToCubesBloomThreshold,
+          iglooToCubesBlend
+        )
+      };
+    }
 
     // 有 bloom 时，先把 composite 输出到中间 target，再做 bloom。
     if ((bloomState?.bloomStrength ?? 0) > 0.001) {

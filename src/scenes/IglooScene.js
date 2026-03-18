@@ -1996,7 +1996,6 @@ export class IglooScene extends SceneBase {
       0.1,
       1.0,
     );
-
     return {
       panelProgress,
       brandProgress,
@@ -2005,7 +2004,7 @@ export class IglooScene extends SceneBase {
       legalProgress,
       introParticlesProgress: introParticlesPresence,
       cameraProgress,
-      whiteoutProgress: smoothWindow(progress, 0.58, 0.92),
+      whiteoutProgress: 0,
     };
   }
 
@@ -2015,15 +2014,13 @@ export class IglooScene extends SceneBase {
 
   getColorCorrectionState() {
     // HomeSceneRenderer 会消费这里的返回值，对 igloo section 应用 LUT 和 bloom。
-    const whiteoutProgress = this.presentationState.whiteoutProgress ?? 0;
     const bloomStrength =
       THREE.MathUtils.lerp(0.92, 0.72, this.introProgress) *
-      Math.max(this.introDebugSettings.bloomStrengthScale, 0) *
-      THREE.MathUtils.lerp(1, 0.9, whiteoutProgress);
+      Math.max(this.introDebugSettings.bloomStrengthScale, 0);
     return {
       profile: "igloo",
-      gradientAlpha: THREE.MathUtils.lerp(0.9, 0.24, whiteoutProgress),
-      lutIntensity: THREE.MathUtils.lerp(1, 0.62, whiteoutProgress),
+      gradientAlpha: 1,
+      lutIntensity: 1,
       bloomStrength,
       bloomRadius: THREE.MathUtils.lerp(0.42, 0.28, this.introProgress),
       bloomThreshold: THREE.MathUtils.lerp(0.76, 0.84, this.introProgress),
@@ -2263,7 +2260,7 @@ export class IglooScene extends SceneBase {
     const snowPresence = sectionPresence * 0.7;
     const smokePresence = sectionPresence;
     const timelineWeight = smoothWindow(this.progress, 0.14, 1);
-    const whiteoutProgress = smoothWindow(this.progress, 0.56, 0.9);
+    const whiteoutProgress = 0;
     const introTime = Math.min(this.introElapsed, this.introDuration);
     const introCameraBlend = cubicBezierEase(
       clamp01((introTime - 2.0) / 5.5),

@@ -61,6 +61,7 @@ const CUBES_BG_FRAGMENT_SHADER = /* glsl */ `
   uniform sampler2D tDotPattern;
   uniform sampler2D tBlue;
   uniform vec2 uBlueOffset;
+  uniform float uDotStrength;
 
   float hash12(vec2 p) {
     vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -92,7 +93,7 @@ const CUBES_BG_FRAGMENT_SHADER = /* glsl */ `
     float dots = texture2D(tDotPattern, dotUv).r;
     float dotId = hash12(floor(dotUv));
     float dotFade = 1.0 - abs(fract(dotId + uTime * 0.1) - 0.5) * 2.0;
-    color += dots * dotFade * 0.45;
+    color += dots * dotFade * uDotStrength;
 
     color += getBlueNoise(gl_FragCoord.xy).rgb * 0.05;
     gl_FragColor = vec4(color, 1.0);
@@ -524,6 +525,17 @@ const TEXT_CYLINDER_FRAGMENT_SHADER = /* glsl */ `
   }
 `;
 
+const DEFAULT_CUBES_LOOK_SETTINGS = Object.freeze({
+  lutIntensity: 0.42,
+  bloomStrength: 0.08,
+  bloomRadius: 0.68,
+  bloomThreshold: 0.62,
+  bgDotStrength: 0.45,
+  backgroundShapeAlphaScale: 0.3,
+  blurryTextOpacityScale: 0.12,
+  smokeOpacityScale: 1
+});
+
 function clamp01(value) {
   return Math.min(Math.max(value, 0), 1);
 }
@@ -688,6 +700,7 @@ export class CubesScene extends SceneBase {
     // -------- 运行时状态 --------
     this.assets = assets;
     this.projects = projects;
+    this.lookDebugSettings = { ...DEFAULT_CUBES_LOOK_SETTINGS };
     this.time = 0;
     this.cubes = [];
     this.cubeGroups = [];
@@ -738,6 +751,7 @@ export class CubesScene extends SceneBase {
     this.pointerTargetStrength = 0;
     this.pointerStrength = 0;
     this.scrollVelocity = 0;
+    this.shardMix = 0;
     this.lastProgress = this.progress;
     this.blueOffset = new THREE.Vector2();
     this.parentWorldQuaternion = new THREE.Quaternion();
@@ -777,7 +791,8 @@ export class CubesScene extends SceneBase {
           tPerlin: { value: assets.get('texture', 'detail-perlin') ?? null },
           tDotPattern: { value: assets.get('texture', 'dot-pattern') ?? null },
           tBlue: { value: this.blueNoise },
-          uBlueOffset: { value: this.blueOffset.clone() }
+          uBlueOffset: { value: this.blueOffset.clone() },
+          uDotStrength: { value: this.lookDebugSettings.bgDotStrength }
         },
         vertexShader: CUBES_BG_VERTEX_SHADER,
         fragmentShader: CUBES_BG_FRAGMENT_SHADER,
@@ -1022,6 +1037,45 @@ export class CubesScene extends SceneBase {
     this.camera.lookAt(0, 0, 0);
   }
 
+  getLookDebugSettings() {
+    return { ...this.lookDebugSettings };
+  }
+
+  getLookDebugDefaults() {
+    return { ...DEFAULT_CUBES_LOOK_SETTINGS };
+  }
+
+  setLookDebugSetting(key, value) {
+    if (!(key in this.lookDebugSettings) || !Number.isFinite(value)) {
+      return;
+    }
+
+    this.lookDebugSettings[key] = value;
+
+    if (key === 'bgDotStrength' && this.roomBackground) {
+      this.roomBackground.material.uniforms.uDotStrength.value = value;
+    }
+  }
+
+  resetLookDebugSettings() {
+    this.lookDebugSettings = { ...DEFAULT_CUBES_LOOK_SETTINGS };
+
+    if (this.roomBackground) {
+      this.roomBackground.material.uniforms.uDotStrength.value =
+        this.lookDebugSettings.bgDotStrength;
+    }
+  }
+
+  getColorCorrectionState() {
+    return {
+      profile: 'cubes',
+      lutIntensity: this.lookDebugSettings.lutIntensity,
+      bloomStrength: this.lookDebugSettings.bloomStrength,
+      bloomRadius: this.lookDebugSettings.bloomRadius,
+      bloomThreshold: this.lookDebugSettings.bloomThreshold
+    };
+  }
+
   getInitialAutoCenterProgress() {
     return this.cubeBaseStates[0]?.centeredProgress ?? (1 / (this.projects.length + 1));
   }
@@ -1159,11 +1213,6 @@ export class CubesScene extends SceneBase {
     this.detailFocusIndex = this.projects.findIndex((project) => project.hash === projectHash);
   }
 
-  setHoveredProject(projectHash = null) {
-    this.hoveredProjectHash = projectHash;
-    this.hoveredProjectIndex = this.projects.findIndex((project) => project.hash === projectHash);
-  }
-
   setDetailFocus(projectHash = null, progress = 0) {
     this.detailFocusHash = projectHash;
     this.detailFocusProgress = THREE.MathUtils.clamp(progress, 0, 1);
@@ -1280,20 +1329,32 @@ export class CubesScene extends SceneBase {
     };
   }
 
+  getCenteredProjectIndex() {
+    return this.cubeBaseStates.reduce((closestIndex, state, index, states) => {
+      if (closestIndex < 0) {
+        return index;
+      }
+
+      const currentDistance = Math.abs(state.centeredProgress - this.progress);
+      const previousDistance = Math.abs(states[closestIndex].centeredProgress - this.progress);
+      return currentDistance < previousDistance ? index : closestIndex;
+    }, -1);
+  }
+
+  getOverlayProjectIndex() {
+    return this.hoveredProjectIndex >= 0 ? this.hoveredProjectIndex : this.getCenteredProjectIndex();
+  }
+
+  getAudioState() {
+    return {
+      shardMix: this.shardMix
+    };
+  }
+
   getOverlayPresentation() {
     // 给 WebGLUiScene 输出当前激活项目的屏幕锚点与框线点位。
     const { enterProgress, exitProgress } = this.getSectionHandoffState();
-    const activeIndex = this.hoveredProjectIndex >= 0
-      ? this.hoveredProjectIndex
-      : this.cubeBaseStates.reduce((closestIndex, state, index, states) => {
-        if (closestIndex < 0) {
-          return index;
-        }
-
-        const currentDistance = Math.abs(state.centeredProgress - this.progress);
-        const previousDistance = Math.abs(states[closestIndex].centeredProgress - this.progress);
-        return currentDistance < previousDistance ? index : closestIndex;
-      }, -1);
+    const activeIndex = this.getOverlayProjectIndex();
     const project = activeIndex >= 0 ? this.projects[activeIndex] : null;
     const cube = activeIndex >= 0 ? this.cubes[activeIndex] : null;
     const state = activeIndex >= 0 ? this.cubeBaseStates[activeIndex] : null;
@@ -1437,6 +1498,7 @@ export class CubesScene extends SceneBase {
     const hoverEnabled = this.detailFocusIndex < 0;
     const hoverPresence = hoverEnabled && this.hoveredProjectIndex >= 0 ? 1 : 0;
     const { enterProgress, exitProgress } = this.getSectionHandoffState();
+    const centeredIndex = this.getCenteredProjectIndex();
     const entryLift = 1 - enterProgress;
     const cameraTrackY = -scrollOffset;
     const motionBlurAmount = THREE.MathUtils.clamp(this.scrollVelocity * 0.1, 0, 1);
@@ -1549,6 +1611,25 @@ export class CubesScene extends SceneBase {
     });
 
     // -------- 背景 shapes / blurry text 辅助层 --------
+    const shardSourceIndex = this.detailFocusIndex >= 0 ? this.detailFocusIndex : centeredIndex;
+    const shardSourceState = shardSourceIndex >= 0 ? this.cubeBaseStates[shardSourceIndex] : null;
+    const shardCenterPresence = shardSourceState
+      ? 1 - smoothWindow(Math.abs(shardSourceState.centeredProgress - this.progress), 0.06, 0.38)
+      : 0;
+    const shardFrostEnergy = shardSourceIndex >= 0
+      ? (this.frostMaps[shardSourceIndex]?.soundVelocity ?? 0)
+      : 0;
+    const shardTarget = THREE.MathUtils.clamp(
+      shardFrostEnergy
+        * shardCenterPresence
+        * enterProgress
+        * (1 - exitProgress * 0.92)
+        * (1 - this.detailFocusProgress * 0.58),
+      0,
+      1
+    );
+    this.shardMix = THREE.MathUtils.lerp(this.shardMix, shardTarget, 1 - Math.exp(-safeDelta * 5));
+
     const backgroundPresence = enterProgress
       * (1 - exitProgress * 0.92)
       * (1 - this.detailFocusProgress * 0.82);
@@ -1562,6 +1643,7 @@ export class CubesScene extends SceneBase {
       this.backgroundShapes.material.uniforms.uProgress.value = this.progress;
       this.backgroundShapes.material.uniforms.uAspect.value = this.camera.aspect;
       this.backgroundShapes.material.uniforms.uAlpha.value = THREE.MathUtils.lerp(0.18, 0.34, enterProgress)
+        * this.lookDebugSettings.backgroundShapeAlphaScale
         * (1 - exitProgress * 0.88)
         * (1 - this.detailFocusProgress * 0.82);
     }
@@ -1572,6 +1654,7 @@ export class CubesScene extends SceneBase {
       this.blurryText.material.uniforms.uProgress.value = this.progress;
       this.blurryText.material.uniforms.uAspect.value = this.camera.aspect;
       this.blurryText.material.uniforms.uOpacity.value = THREE.MathUtils.lerp(0.08, 0.16, enterProgress)
+        * this.lookDebugSettings.blurryTextOpacityScale
         * (1 - exitProgress * 0.92)
         * (1 - this.detailFocusProgress * 0.78);
     }
@@ -1651,6 +1734,7 @@ export class CubesScene extends SceneBase {
       smokeMesh.quaternion.copy(this.inverseParentQuaternion.multiply(this.cameraWorldQuaternion));
       smokeMesh.material.opacity = THREE.MathUtils.lerp(0.65, 1.2, this.hoveredProjectIndex === index ? 1 : 0)
         + frostEnergy * 0.35;
+      smokeMesh.material.opacity *= this.lookDebugSettings.smokeOpacityScale;
     });
   }
 

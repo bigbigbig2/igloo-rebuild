@@ -201,6 +201,10 @@ export class AssetRegistry {
 
     const texture = await loadWithLoader(this.ktx2Loader, entry.source);
 
+    if (entry.kind === 'lut-3d') {
+      return texture;
+    }
+
     if (entry.colorSpace === 'srgb') {
       texture.colorSpace = THREE.SRGBColorSpace;
     }

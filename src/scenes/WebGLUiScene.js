@@ -213,6 +213,64 @@ function formatCubeTemperature(baseTemp = 0, elapsed = 0, seed = 0) {
   return `TEMP  ${fahrenheitLabel}\n${celsiusLabel}`;
 }
 
+function smoothStep01(value) {
+  const t = clamp(value, 0, 1);
+  return t * t * (3 - 2 * t);
+}
+
+function rangeProgress(value, start, end) {
+  if (Math.abs(end - start) <= 1e-6) {
+    return value >= end ? 1 : 0;
+  }
+
+  return smoothStep01((value - start) / (end - start));
+}
+
+function trimPolyline(points = [], progress = 1) {
+  if (!Array.isArray(points) || points.length < 2 || progress <= 0) {
+    return [];
+  }
+
+  if (progress >= 1) {
+    return points.map((point) => point.clone());
+  }
+
+  const segmentLengths = [];
+  let totalLength = 0;
+
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const length = points[index].distanceTo(points[index + 1]);
+    segmentLengths.push(length);
+    totalLength += length;
+  }
+
+  if (totalLength <= 1e-6) {
+    return [];
+  }
+
+  let remaining = totalLength * clamp(progress, 0, 1);
+  const trimmed = [points[0].clone()];
+
+  for (let index = 0; index < segmentLengths.length; index += 1) {
+    const segmentLength = segmentLengths[index];
+    const pointA = points[index];
+    const pointB = points[index + 1];
+
+    if (remaining >= segmentLength) {
+      trimmed.push(pointB.clone());
+      remaining -= segmentLength;
+      continue;
+    }
+
+    if (remaining > 0 && segmentLength > 1e-6) {
+      trimmed.push(pointA.clone().lerp(pointB, remaining / segmentLength));
+    }
+    break;
+  }
+
+  return trimmed.length >= 2 ? trimmed : [];
+}
+
 /**
  * WebGLUiScene 是首页高保真 HUD 的 WebGL 实现。
  *
@@ -227,9 +285,10 @@ function formatCubeTemperature(baseTemp = 0, elapsed = 0, seed = 0) {
  * - WebGLUiScene 负责逐步接管更接近原站风格的可视层
  */
 export class WebGLUiScene {
-  constructor({ content, assets }) {
+  constructor({ content, assets, audio = null }) {
     this.content = content;
     this.assets = assets;
+    this.audio = audio;
     this.size = { width: 1, height: 1 };
     this.scene = new THREE.Scene();
     this.scene.background = null;
@@ -300,7 +359,16 @@ export class WebGLUiScene {
     this.basePositions = {};
     this.cubesOverlay = {
       titleKey: null,
-      tempKey: null
+      tempKey: null,
+      activeHash: null,
+      visible: false,
+      revealClock: 0,
+      lastBeepTime: -Infinity,
+      segmentPlayed: {
+        title: false,
+        meta: false,
+        temp: false
+      }
     };
 
     this.cubesGroup.add(this.cubesLines.frame, this.cubesLines.title, this.cubesLines.date);
@@ -483,6 +551,60 @@ export class WebGLUiScene {
     }
   }
 
+  resetCubesOverlayReveal(projectHash = null) {
+    this.cubesOverlay.activeHash = projectHash;
+    this.cubesOverlay.revealClock = 0;
+    this.cubesOverlay.segmentPlayed.title = false;
+    this.cubesOverlay.segmentPlayed.meta = false;
+    this.cubesOverlay.segmentPlayed.temp = false;
+  }
+
+  playRandomCubeBeep() {
+    if (!this.audio || this.elapsed - this.cubesOverlay.lastBeepTime < 0.38) {
+      return;
+    }
+
+    const keys = ['beeps', 'beeps2', 'beeps3'];
+    const key = keys[Math.floor(Math.random() * keys.length)] ?? keys[0];
+    this.cubesOverlay.lastBeepTime = this.elapsed;
+    this.audio.play(key);
+  }
+
+  updateCubesOverlayRuntime(delta = 0) {
+    const presentation = this.state.cubesPresentation;
+    const isCubesHome = this.state.routeName === 'home'
+      && this.state.activeSectionKey === 'cubes'
+      && !this.state.hasProject;
+    const isVisible = isCubesHome
+      && Boolean(presentation?.visible)
+      && clamp(presentation?.reveal ?? 0, 0, 1) > 0.02;
+    const projectHash = presentation?.project?.hash ?? null;
+
+    if (!isVisible) {
+      this.cubesOverlay.visible = false;
+      this.cubesOverlay.revealClock = 0;
+      return;
+    }
+
+    if (!this.cubesOverlay.visible || projectHash !== this.cubesOverlay.activeHash) {
+      this.resetCubesOverlayReveal(projectHash);
+    }
+
+    this.cubesOverlay.visible = true;
+    this.cubesOverlay.revealClock = clamp(this.cubesOverlay.revealClock + delta / 0.82, 0, 1);
+
+    [
+      ['title', 0.08],
+      ['meta', 0.32],
+      ['temp', 0.56]
+    ].forEach(([key, threshold]) => {
+      if (!this.cubesOverlay.segmentPlayed[key] && this.cubesOverlay.revealClock >= threshold) {
+        this.cubesOverlay.segmentPlayed[key] = true;
+        this.playRandomCubeBeep();
+      }
+    });
+  }
+
   applyCubesPresentation() {
     // 只有首页 cubes section 且没有进入 detail 时，cubes overlay 才真正显示。
     if (this.readyState !== 'ready') {
@@ -510,30 +632,38 @@ export class WebGLUiScene {
     const mobile = width < 760 || height < 680;
     const small = width < 1180 || height < 820;
     const scale = mobile ? 0.74 : small ? 0.88 : 1;
-    const reveal = clamp(presentation.reveal ?? 0, 0, 1);
+    const baseReveal = clamp(presentation.reveal ?? 0, 0, 1);
+    const runtimeReveal = this.cubesOverlay.revealClock;
+    const frameReveal = baseReveal * rangeProgress(runtimeReveal, 0.0, 0.26);
+    const titleReveal = baseReveal * rangeProgress(runtimeReveal, 0.02, 0.38);
+    const metaReveal = baseReveal * rangeProgress(runtimeReveal, 0.18, 0.56);
+    const tempReveal = baseReveal * rangeProgress(runtimeReveal, 0.38, 0.84);
+    const hoverMix = clamp(presentation.hover ?? 0, 0, 1);
+    const hoverPulse = 1 + hoverMix * (Math.sin(this.elapsed * 6 + (presentation.index ?? 0) * 0.75) * 0.06);
     const titleAnchor = ndcToOverlayPoint(presentation.titleAnchor, width, height);
     const dateAnchor = ndcToOverlayPoint(presentation.dateAnchor, width, height);
     const tempAnchor = ndcToOverlayPoint(presentation.tempAnchor, width, height);
     const frameAnchors = (presentation.frameAnchors ?? []).map((point) => ndcToOverlayPoint(point, width, height));
+    const drift = Math.sin(this.elapsed * 1.9 + (presentation.index ?? 0) * 0.7) * 4 * scale;
     const titlePosition = new THREE.Vector2(
       titleAnchor.x - 188 * scale,
-      titleAnchor.y + 116 * scale
+      titleAnchor.y + 116 * scale + drift * 0.3
     );
     const datePosition = new THREE.Vector2(
       dateAnchor.x + 126 * scale,
-      dateAnchor.y - 18 * scale
+      dateAnchor.y - 18 * scale - drift * 0.12
     );
     const tempPosition = new THREE.Vector2(
       tempAnchor.x + 116 * scale,
-      tempAnchor.y + 72 * scale
+      tempAnchor.y + 72 * scale + drift * 0.22
     );
     const titleElbow = new THREE.Vector2(
       titleAnchor.x - 68 * scale,
-      titleAnchor.y + 56 * scale
+      titleAnchor.y + 56 * scale + drift * 0.16
     );
     const dateElbow = new THREE.Vector2(
       dateAnchor.x + 84 * scale,
-      dateAnchor.y - 14 * scale
+      dateAnchor.y - 14 * scale - drift * 0.08
     );
 
     this.textBlocks.cubeTitle.mesh.scale.set(scale, scale, 1);
@@ -541,48 +671,65 @@ export class WebGLUiScene {
     this.textBlocks.cubeTemp.mesh.scale.set(scale, scale, 1);
 
     this.textBlocks.cubeTitle.mesh.position.set(
-      titlePosition.x,
-      titlePosition.y + (1 - reveal) * 14 * scale,
+      titlePosition.x - (1 - titleReveal) * 12 * scale,
+      titlePosition.y + (1 - titleReveal) * 14 * scale,
       0
     );
     this.textBlocks.cubeMeta.mesh.position.set(
-      datePosition.x,
-      datePosition.y - (1 - reveal) * 12 * scale,
+      datePosition.x + (1 - metaReveal) * 10 * scale,
+      datePosition.y - (1 - metaReveal) * 12 * scale,
       0
     );
     this.textBlocks.cubeTemp.mesh.position.set(
-      tempPosition.x,
-      tempPosition.y + (1 - reveal) * 10 * scale,
+      tempPosition.x + (1 - tempReveal) * 6 * scale,
+      tempPosition.y + (1 - tempReveal) * 10 * scale,
       0
     );
 
-    this.textBlocks.cubeTitle.setOpacity(reveal);
-    this.textBlocks.cubeMeta.setOpacity(reveal);
-    this.textBlocks.cubeTemp.setOpacity(reveal * 0.9);
+    this.textBlocks.cubeTitle.setOpacity(titleReveal);
+    this.textBlocks.cubeMeta.setOpacity(metaReveal);
+    this.textBlocks.cubeTemp.setOpacity(clamp(tempReveal * 0.9 * hoverPulse, 0, 1));
 
-    setLinePoints(this.cubesLines.title, [
+    const titlePolyline = [
       titleAnchor,
       titleElbow,
       new THREE.Vector2(titlePosition.x + 40 * scale, titlePosition.y - 14 * scale)
-    ]);
-    setLinePoints(this.cubesLines.date, [
+    ];
+    const datePolyline = [
       dateAnchor,
       dateElbow,
-      new THREE.Vector2(datePosition.x - this.textBlocks.cubeMeta.size.width * scale - 16 * scale, datePosition.y - 12 * scale)
-    ]);
+      new THREE.Vector2(
+        datePosition.x - this.textBlocks.cubeMeta.size.width * scale - 16 * scale,
+        datePosition.y - 12 * scale
+      )
+    ];
+    const trimmedTitleLine = trimPolyline(titlePolyline, rangeProgress(runtimeReveal, 0.06, 0.42));
+    const trimmedDateLine = trimPolyline(datePolyline, rangeProgress(runtimeReveal, 0.22, 0.6));
+    const trimmedFrameLine = trimPolyline(frameAnchors, frameReveal);
 
-    if (frameAnchors.length >= 2) {
-      setLinePoints(this.cubesLines.frame, frameAnchors);
+    if (trimmedFrameLine.length >= 2) {
+      setLinePoints(this.cubesLines.frame, trimmedFrameLine);
       this.cubesLines.frame.visible = true;
-      this.cubesLines.frame.material.opacity = reveal * 0.32;
+      this.cubesLines.frame.material.opacity = frameReveal * THREE.MathUtils.lerp(0.28, 0.4, hoverMix);
     } else {
       this.cubesLines.frame.visible = false;
     }
 
-    this.cubesLines.title.visible = true;
-    this.cubesLines.date.visible = true;
-    this.cubesLines.title.material.opacity = reveal * 0.9;
-    this.cubesLines.date.material.opacity = reveal * 0.85;
+    if (trimmedTitleLine.length >= 2) {
+      setLinePoints(this.cubesLines.title, trimmedTitleLine);
+      this.cubesLines.title.visible = true;
+      this.cubesLines.title.material.opacity = titleReveal * THREE.MathUtils.lerp(0.84, 1, hoverMix);
+    } else {
+      this.cubesLines.title.visible = false;
+    }
+
+    if (trimmedDateLine.length >= 2) {
+      setLinePoints(this.cubesLines.date, trimmedDateLine);
+      this.cubesLines.date.visible = true;
+      this.cubesLines.date.material.opacity = metaReveal * THREE.MathUtils.lerp(0.78, 0.92, hoverMix);
+    } else {
+      this.cubesLines.date.visible = false;
+    }
   }
 
   layout() {
@@ -732,6 +879,7 @@ export class WebGLUiScene {
   animate(delta, elapsed) {
     // animate 是 WebGL HUD 的逐帧动画层，例如 logo 呼吸和 sound pulse。
     this.elapsed = elapsed;
+    this.updateCubesOverlayRuntime(delta);
 
     if (this.heroGroup.visible) {
       const logoPulse = 0.985 + Math.sin(elapsed * 1.4) * 0.015;
@@ -749,7 +897,7 @@ export class WebGLUiScene {
       this.soundGroup.scale.set(1, 1, 1);
     }
 
-    if (this.cubesGroup.visible) {
+    if (this.readyState === 'ready') {
       this.updateCubesOverlayContent();
       this.applyCubesPresentation();
     }

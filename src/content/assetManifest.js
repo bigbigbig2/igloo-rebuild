@@ -56,7 +56,7 @@ export const assetManifest = {
     { section: 'igloo', key: 'mosaic-noise', source: '/reference-assets/images/mosaic.ktx2', colorSpace: 'srgb', wrap: 'repeat', filter: 'nearest' },
     { section: 'igloo', key: 'clouds-noise', source: '/reference-assets/images/clouds_noise.ktx2', colorSpace: 'srgb', wrap: 'repeat', repeat: [2, 2] },
     { section: 'igloo', key: 'wind-noise', source: '/reference-assets/images/wind_noise.ktx2', wrap: 'repeat', repeat: [2, 2] },
-    { section: 'igloo', key: 'igloo-scene-lut', source: '/reference-assets/images/igloo/igloo_scene.ktx2' },
+    { section: 'igloo', key: 'igloo-scene-lut', source: '/reference-assets/images/igloo/igloo_scene.ktx2', kind: 'lut-3d' },
     { section: 'runtime', key: 'scroll-data', source: '/reference-assets/images/runtime/scroll-datatexture.ktx2', wrap: 'repeat', repeat: [2, 2] },
     { section: 'runtime', key: 'frost-data', source: '/reference-assets/images/runtime/frost-datatexture.ktx2', wrap: 'repeat', repeat: [2, 2] },
     { section: 'runtime', key: 'blue-noise', source: '/reference-assets/images/noises/blue-8-128-rgb.ktx2', wrap: 'repeat', repeat: [2, 2] },
@@ -64,7 +64,7 @@ export const assetManifest = {
     { section: 'cubes', key: 'blurrytext-atlas', source: '/reference-assets/images/cubes/blurrytext_atlas.ktx2', colorSpace: 'srgb', wrap: 'repeat' },
     { section: 'cubes', key: 'dot-pattern', source: '/reference-assets/images/cubes/dot_pattern.ktx2', colorSpace: 'srgb', wrap: 'repeat', repeat: [2, 2] },
     { section: 'cubes', key: 'shapes-blurred', source: '/reference-assets/images/shapes_blurred.ktx2', colorSpace: 'srgb' },
-    { section: 'cubes', key: 'cube-scene', source: '/reference-assets/images/cubes/cube_scene.ktx2', colorSpace: 'srgb' },
+    { section: 'cubes', key: 'cube-scene', source: '/reference-assets/images/cubes/cube_scene.ktx2', kind: 'lut-3d' },
     { section: 'cubes', key: 'cube1-normal', source: '/reference-assets/images/cubes/cube1_normal.ktx2' },
     { section: 'cubes', key: 'cube1-roughness', source: '/reference-assets/images/cubes/cube1_roughness.ktx2' },
     { section: 'cubes', key: 'cube2-normal', source: '/reference-assets/images/cubes/cube2_normal.ktx2' },
@@ -93,6 +93,13 @@ export const assetManifest = {
     { section: 'global', key: 'music-bg', source: '../www.igloo.inc/assets/audio/music-highq.ogg' },
     { section: 'global', key: 'room-bg', source: '../www.igloo.inc/assets/audio/room.ogg' },
     { section: 'igloo', key: 'manifesto', source: '../www.igloo.inc/assets/audio/manifesto.ogg' },
-    { section: 'cubes', key: 'click-project', source: '../www.igloo.inc/assets/audio/click-project.ogg' }
+    { section: 'cubes', key: 'click-project', source: '../www.igloo.inc/assets/audio/click-project.ogg' },
+    { section: 'detail', key: 'enter-project', source: '../www.igloo.inc/assets/audio/enter-project.ogg' },
+    { section: 'detail', key: 'leave-project', source: '../www.igloo.inc/assets/audio/leave-project.ogg' },
+    { section: 'cubes', key: 'beeps', source: '../www.igloo.inc/assets/audio/beeps.ogg' },
+    { section: 'cubes', key: 'beeps2', source: '../www.igloo.inc/assets/audio/beeps2.ogg' },
+    { section: 'cubes', key: 'beeps3', source: '../www.igloo.inc/assets/audio/beeps3.ogg' },
+    { section: 'cubes', key: 'shard', source: '../www.igloo.inc/assets/audio/shard.ogg' },
+    { section: 'detail', key: 'project-text', source: '../www.igloo.inc/assets/audio/project-text.ogg' }
   ]
 };

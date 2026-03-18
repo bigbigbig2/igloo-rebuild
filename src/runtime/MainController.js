@@ -75,6 +75,8 @@ export class MainController {
     this.homeScrollSnapshot = null;
     // detailPhases 是 detailTransition 的快照，拆分了多个子进度。
     this.detailPhases = this.detailTransition.getSnapshot();
+    this.pendingProjectEnterAudio = null;
+    this.pendingProjectTextAudio = null;
     // scroll 停止多久后才允许自动居中。
     this.scrollIdleDelay = 1.1;
     this.lastScrollInputTime = 0;
@@ -142,7 +144,8 @@ export class MainController {
     // WebGL HUD 与首页合成渲染器关联，作为最上层 overlay scene 使用。
     this.webglUi = new WebGLUiScene({
       content: this.content,
-      assets: this.assets
+      assets: this.assets,
+      audio: this.audio
     });
     await this.webglUi.ready;
     this.homeRenderer.setOverlayScene(this.webglUi);
@@ -469,6 +472,8 @@ export class MainController {
       }
 
       this.currentProject = project;
+      this.pendingProjectEnterAudio = project.hash;
+      this.pendingProjectTextAudio = project.hash;
       this.setHoveredProject(null);
 
       if (this.homeScrollSnapshot == null) {
@@ -487,6 +492,9 @@ export class MainController {
     } else {
       // 从 detail 返回首页时，尽量恢复之前记录的首页位置。
       if (previousRoute.name === 'project') {
+        this.audio?.play('leave-project');
+        this.pendingProjectEnterAudio = null;
+        this.pendingProjectTextAudio = null;
         this.scrollState.jumpTo(this.homeScrollSnapshot ?? cubesScrollStart);
       }
 
@@ -510,6 +518,27 @@ export class MainController {
     // detailTransition 每帧推进，并拆解出更细的多段进度。
     const detailProgress = this.detailTransition.step(delta);
     this.detailPhases = this.detailTransition.getSnapshot();
+
+    if (this.currentProject) {
+      if (
+        this.pendingProjectEnterAudio === this.currentProject.hash
+        && this.detailPhases.sceneProgress >= 0.04
+      ) {
+        this.audio?.play('enter-project');
+        this.pendingProjectEnterAudio = null;
+      }
+
+      if (
+        this.pendingProjectTextAudio === this.currentProject.hash
+        && this.detailPhases.uiProgress >= 0.12
+      ) {
+        this.audio?.play('project-text');
+        this.pendingProjectTextAudio = null;
+      }
+    } else {
+      this.pendingProjectEnterAudio = null;
+      this.pendingProjectTextAudio = null;
+    }
     // detailAnchor 来自当前被选中的 cube，用于首页对象 -> detail 对象的镜头接续。
     const detailAnchor = this.currentProject
       ? this.sections.cubes?.getDetailAnchor(this.currentProject.hash) ?? null
@@ -525,6 +554,8 @@ export class MainController {
 
     // 每帧都重新同步首页 section 状态，再把结果交给 renderer。
     this.syncHomeScene();
+    const cubesAudioState = this.sections.cubes?.getAudioState?.() ?? null;
+    this.audio?.setTrackTargetMix('shard', cubesAudioState?.shardMix ?? 0);
     this.audio?.update(delta, {
       routeName: this.route.name,
       activeSectionKey: this.homeState?.key ?? null,
