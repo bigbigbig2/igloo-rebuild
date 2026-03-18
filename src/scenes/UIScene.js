@@ -108,8 +108,11 @@ export class UIScene {
     this.projectList = this.root.querySelector('[data-project-list]');
     this.projectDetail = this.root.querySelector('[data-project-detail]');
     this.entryPanel = this.root.querySelector('[data-entry-panel]');
+    this.socialPanel = this.root.querySelector('[data-social-panel]');
     this.socialLinks = this.root.querySelector('[data-social-links]');
     this.interactionLabel = this.root.querySelector('[data-interaction-label]');
+    this.pillbar = this.root.querySelector('.hud__pillbar');
+    this.footer = this.root.querySelector('.hud__footer');
 
     this.renderProjectCards();
     this.renderEntryPanel();
@@ -383,7 +386,7 @@ export class UIScene {
   applyCubesHomePresentation(route = null, activeSectionKey = null, hasProject = false) {
     // cubes section 首页阶段更依赖 WebGL HUD，因此会压低 DOM HUD 可见度。
     const isCubesHome = route?.name === 'home' && activeSectionKey === 'cubes' && !hasProject;
-    const sidePanels = [this.projectList, this.root.querySelector('[data-social-panel]')].filter(Boolean);
+    const sidePanels = [this.projectList, this.socialPanel].filter(Boolean);
     const hiddenOpacity = isCubesHome ? '0' : '';
     const hiddenPointerEvents = isCubesHome ? 'none' : '';
     const hiddenTransform = isCubesHome ? 'translate3d(0, 16px, 0)' : '';
@@ -398,19 +401,16 @@ export class UIScene {
       panel.style.transform = hiddenTransform;
     });
 
-    const pillbar = this.root.querySelector('.hud__pillbar');
-    const footer = this.root.querySelector('.hud__footer');
-
-    if (pillbar) {
-      pillbar.style.opacity = hiddenOpacity;
-      pillbar.style.pointerEvents = hiddenPointerEvents;
-      pillbar.style.transform = hiddenTransform;
+    if (this.pillbar) {
+      this.pillbar.style.opacity = hiddenOpacity;
+      this.pillbar.style.pointerEvents = hiddenPointerEvents;
+      this.pillbar.style.transform = hiddenTransform;
     }
 
-    if (footer) {
-      footer.style.opacity = hiddenOpacity;
-      footer.style.pointerEvents = hiddenPointerEvents;
-      footer.style.transform = hiddenTransform;
+    if (this.footer) {
+      this.footer.style.opacity = hiddenOpacity;
+      this.footer.style.pointerEvents = hiddenPointerEvents;
+      this.footer.style.transform = hiddenTransform;
     }
   }
 
@@ -420,9 +420,9 @@ export class UIScene {
     const panels = [
       this.manifestoShell,
       this.projectList,
-      this.root.querySelector('[data-social-panel]'),
-      this.root.querySelector('.hud__pillbar'),
-      this.root.querySelector('.hud__footer')
+      this.socialPanel,
+      this.pillbar,
+      this.footer
     ].filter(Boolean);
 
     const hiddenOpacity = isEntryHome ? '0' : '';
@@ -434,6 +434,26 @@ export class UIScene {
       panel.style.pointerEvents = hiddenPointerEvents;
       panel.style.transform = hiddenTransform;
     });
+  }
+
+  setPanelDisplay(panel, visible = true) {
+    if (!panel) {
+      return;
+    }
+
+    panel.style.display = visible ? '' : 'none';
+  }
+
+  applyWebglHudSuppression(useWebglUi = false, route = null, activeSectionKey = null, hasProject = false) {
+    const isHome = route?.name === 'home';
+    const suppressIglooDom = useWebglUi && isHome && activeSectionKey === 'igloo' && !hasProject;
+    const suppressCubesDom = useWebglUi && isHome && activeSectionKey === 'cubes' && !hasProject;
+
+    this.setPanelDisplay(this.manifestoShell, !suppressIglooDom && !suppressCubesDom);
+    this.setPanelDisplay(this.footer, !suppressIglooDom && !suppressCubesDom);
+    this.setPanelDisplay(this.projectList, !suppressCubesDom);
+    this.setPanelDisplay(this.socialPanel, !suppressCubesDom);
+    this.setPanelDisplay(this.pillbar, !suppressCubesDom);
   }
 
   update(state) {
@@ -464,14 +484,25 @@ export class UIScene {
     this.root.dataset.section = nextActiveSectionKey ?? 'none';
     this.root.dataset.detail = nextProjectHash ? 'true' : 'false';
     this.root.dataset.webglUi = state.useWebglUi ? 'true' : 'false';
+    this.applyWebglHudSuppression(
+      state.useWebglUi,
+      state.route,
+      nextActiveSectionKey,
+      Boolean(nextProjectHash)
+    );
 
     this.state.detailUiProgress = nextDetailUiProgress;
+    const suppressHoveredProjectCards =
+      state.useWebglUi
+      && nextRouteName === 'home'
+      && nextActiveSectionKey === 'cubes'
+      && !nextProjectHash;
 
     // 如果关键状态没变，就不重渲染列表与 detail 卡片，避免不必要 DOM 抖动。
     if (
       this.state.routeName === nextRouteName
       && this.state.projectHash === nextProjectHash
-      && this.state.hoveredProjectHash === nextHoveredProjectHash
+      && (suppressHoveredProjectCards || this.state.hoveredProjectHash === nextHoveredProjectHash)
       && this.state.activeSectionKey === nextActiveSectionKey
     ) {
       return;
@@ -482,7 +513,9 @@ export class UIScene {
     this.state.hoveredProjectHash = nextHoveredProjectHash;
     this.state.activeSectionKey = nextActiveSectionKey;
 
-    this.renderProjectCards(nextProjectHash ?? nextHoveredProjectHash);
+    if (!suppressHoveredProjectCards) {
+      this.renderProjectCards(nextProjectHash ?? nextHoveredProjectHash);
+    }
     this.renderProjectDetail(state.project);
   }
 }

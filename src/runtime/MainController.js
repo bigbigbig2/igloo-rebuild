@@ -130,7 +130,8 @@ export class MainController {
       igloo: new IglooScene({ assets: this.assets }),
       cubes: new CubesScene({
         assets: this.assets,
-        projects: this.content.projects
+        projects: this.content.projects,
+        clickLabel: this.content.clickLabel
       }),
       entry: new EntryScene({ assets: this.assets })
     };

@@ -181,6 +181,60 @@ export async function loadFontMetrics(url) {
   return response.json();
 }
 
+function wrapCanvasText(context, text, maxWidth) {
+  const paragraphs = `${text ?? ''}`.split('\n');
+  const lines = [];
+
+  paragraphs.forEach((paragraph) => {
+    const words = paragraph.split(/\s+/).filter(Boolean);
+
+    if (!Number.isFinite(maxWidth) || words.length <= 1) {
+      lines.push(words.length > 0 ? words.join(' ') : paragraph);
+      return;
+    }
+
+    let currentLine = words.shift();
+
+    words.forEach((word) => {
+      const nextLine = `${currentLine} ${word}`;
+      if (context.measureText(nextLine).width > maxWidth) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = nextLine;
+      }
+    });
+
+    lines.push(currentLine);
+  });
+
+  return lines.length > 0 ? lines : [''];
+}
+
+function buildCanvasTextGeometry(width, height) {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute(
+    'position',
+    new THREE.Float32BufferAttribute([
+      0, 0, 0,
+      width, 0, 0,
+      width, -height, 0,
+      0, -height, 0
+    ], 3)
+  );
+  geometry.setAttribute(
+    'uv',
+    new THREE.Float32BufferAttribute([
+      0, 1,
+      1, 1,
+      1, 0,
+      0, 0
+    ], 2)
+  );
+  geometry.setIndex([0, 1, 2, 0, 2, 3]);
+  return geometry;
+}
+
 export class MsdfTextBlock {
   constructor({
     fontData,
@@ -240,6 +294,122 @@ export class MsdfTextBlock {
 
   dispose() {
     this.mesh.geometry.dispose();
+    this.material.dispose();
+  }
+}
+
+export class CanvasTextBlock {
+  constructor({
+    text = '',
+    maxWidth = Infinity,
+    fontSize = 16,
+    lineHeight = 1.3,
+    align = 'left',
+    color = '#ffffff',
+    fontFamily = '"IBM Plex Mono", monospace',
+    paddingX = null,
+    paddingY = null
+  } = {}) {
+    this.options = {
+      maxWidth,
+      fontSize,
+      lineHeight,
+      align,
+      fontFamily,
+      paddingX,
+      paddingY
+    };
+    this.canvas = document.createElement('canvas');
+    this.context = this.canvas.getContext('2d', { alpha: true });
+    this.texture = new THREE.CanvasTexture(this.canvas);
+    this.texture.colorSpace = THREE.SRGBColorSpace;
+    this.texture.generateMipmaps = false;
+    this.texture.minFilter = THREE.LinearFilter;
+    this.texture.magFilter = THREE.LinearFilter;
+    this.material = new THREE.MeshBasicMaterial({
+      map: this.texture,
+      color: new THREE.Color(color),
+      transparent: true,
+      opacity: 1,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      depthTest: false,
+      toneMapped: false
+    });
+    this.mesh = new THREE.Mesh(new THREE.BufferGeometry(), this.material);
+    this.mesh.frustumCulled = false;
+    this.mesh.renderOrder = 1000;
+    this.size = { width: 0, height: 0 };
+    this.setText(text);
+  }
+
+  setText(text) {
+    this.text = `${text ?? ''}`;
+
+    const {
+      maxWidth,
+      fontSize,
+      lineHeight,
+      align,
+      fontFamily
+    } = this.options;
+
+    const context = this.context;
+    const pixelRatio = Math.max(window.devicePixelRatio ?? 1, 1);
+    const paddingX = this.options.paddingX ?? Math.ceil(fontSize * 0.45);
+    const paddingY = this.options.paddingY ?? Math.ceil(fontSize * 0.35);
+
+    context.font = `${fontSize}px ${fontFamily}`;
+    context.textBaseline = 'top';
+
+    const lines = wrapCanvasText(context, this.text, maxWidth);
+    const lineWidths = lines.map((line) => context.measureText(line).width);
+    const textWidth = lineWidths.reduce((max, width) => Math.max(max, width), 0);
+    const lineStep = fontSize * lineHeight;
+    const textHeight = lines.length > 0
+      ? fontSize + (lines.length - 1) * lineStep
+      : 0;
+    const blockWidth = Math.max(Math.ceil(textWidth + paddingX * 2), 1);
+    const blockHeight = Math.max(Math.ceil(textHeight + paddingY * 2), 1);
+
+    this.canvas.width = Math.max(1, Math.ceil(blockWidth * pixelRatio));
+    this.canvas.height = Math.max(1, Math.ceil(blockHeight * pixelRatio));
+
+    context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+    context.clearRect(0, 0, blockWidth, blockHeight);
+    context.font = `${fontSize}px ${fontFamily}`;
+    context.textBaseline = 'top';
+    context.textAlign = align === 'right' ? 'right' : 'left';
+    context.fillStyle = '#ffffff';
+
+    lines.forEach((line, index) => {
+      const x = align === 'right'
+        ? blockWidth - paddingX
+        : paddingX;
+      const y = paddingY + index * lineStep;
+      context.fillText(line, x, y);
+    });
+
+    this.texture.needsUpdate = true;
+
+    const previousGeometry = this.mesh.geometry;
+    this.mesh.geometry = buildCanvasTextGeometry(blockWidth, blockHeight);
+    previousGeometry?.dispose?.();
+    this.size.width = blockWidth;
+    this.size.height = blockHeight;
+  }
+
+  setColor(color) {
+    this.material.color.set(color);
+  }
+
+  setOpacity(opacity) {
+    this.material.opacity = opacity;
+  }
+
+  dispose() {
+    this.mesh.geometry.dispose();
+    this.texture.dispose();
     this.material.dispose();
   }
 }

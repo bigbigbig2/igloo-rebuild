@@ -74,11 +74,18 @@ function randomCentered(value) {
   return value * 2 - 1;
 }
 
+function shuffleInPlace(items) {
+  for (let index = items.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [items[index], items[swapIndex]] = [items[swapIndex], items[index]];
+  }
+}
+
 export class CubePlexus {
   constructor({
     color = '#dce8ff',
     radius = 0.8,
-    treadmillDist = 2.8,
+    treadmillDist = 3,
     totalPoints = 18,
     maxConnectionsPerPoint = 3
   } = {}) {
@@ -92,7 +99,7 @@ export class CubePlexus {
     this.totalPoints = totalPoints;
     this.maxConnectionsPerPoint = maxConnectionsPerPoint;
     this.maxConnections = this.totalPoints * this.maxConnectionsPerPoint;
-    this.connectDistance = Math.max(this.radius * 1.95, 1.15);
+    this.connectDistance = Math.max(this.radius * 1.8, this.treadmillDist);
     this.clickPulse = 0;
     this.visibleStrength = 0;
     this.captureHidden = false;
@@ -131,13 +138,14 @@ export class CubePlexus {
 
     this.pointMaterial = new THREE.ShaderMaterial({
       uniforms: {
-        uColor: { value: this.color.clone().lerp(new THREE.Color('#ffffff'), 0.35) },
+        uColor: { value: new THREE.Color('#666666') },
         uOpacity: { value: 0 },
-        uPointSize: { value: 46 }
+        uPointSize: { value: 26 }
       },
       vertexShader: POINT_VERTEX_SHADER,
       fragmentShader: POINT_FRAGMENT_SHADER,
-      transparent: true,
+      transparent: false,
+      depthTest: true,
       depthWrite: false,
       blending: THREE.AdditiveBlending
     });
@@ -157,12 +165,13 @@ export class CubePlexus {
 
     this.lineMaterial = new THREE.ShaderMaterial({
       uniforms: {
-        uColor: { value: this.color.clone().lerp(new THREE.Color('#ffffff'), 0.55) },
+        uColor: { value: new THREE.Color('#7f7f7f') },
         uOpacity: { value: 0 }
       },
       vertexShader: LINE_VERTEX_SHADER,
       fragmentShader: LINE_FRAGMENT_SHADER,
-      transparent: true,
+      transparent: false,
+      depthTest: true,
       depthWrite: false,
       blending: THREE.AdditiveBlending
     });
@@ -189,15 +198,18 @@ export class CubePlexus {
     this.visibleStrength = THREE.MathUtils.lerp(this.visibleStrength, visibilityTarget, blend);
     this.clickPulse = THREE.MathUtils.lerp(this.clickPulse, 0, 1 - Math.exp(-delta * 4.5));
 
-    const interaction = clamp01(Math.max(hover, focus, this.clickPulse));
+    const interaction = clamp01(this.clickPulse);
+    const displayMix = clamp01(Math.max(this.visibleStrength, interaction));
     const motionGate = 1 - clamp01(scrollSpeed * 0.85);
-    const connectionDistance = this.connectDistance * THREE.MathUtils.lerp(0.9, 1.2, interaction);
-    const treadmillConnectThreshold = this.treadmillDist * THREE.MathUtils.lerp(0.18, 0.32, interaction);
+    const connectionDistance = this.treadmillDist;
+    const treadmillRange = this.treadmillDist * 0.5;
+    const treadmillConnectThreshold = treadmillRange * 0.75;
 
     this.points.forEach((point, index) => {
       const angle = point.angle + time * (0.3 + point.rand * 0.45);
       const wobble = Math.sin(time * (0.7 + point.rand) + point.drift) * 0.08;
       const radial = point.radial + wobble;
+      const previousY = point.world.y;
       const y = wrapSigned(
         point.height + time * (0.24 + point.rand * 0.15),
         this.treadmillDist
@@ -209,7 +221,9 @@ export class CubePlexus {
         Math.sin(angle) * radial
       );
       point.connections = 0;
-      point.canConnect = motionGate > 0.04 && Math.abs(point.world.y) < treadmillConnectThreshold;
+      point.canConnect = motionGate > 0.04
+        && Math.abs(point.world.y) < treadmillConnectThreshold
+        && Math.abs(previousY - point.world.y) <= treadmillRange;
 
       const positionOffset = index * 3;
       this.pointPositionAttribute.array[positionOffset + 0] = point.world.x;
@@ -258,7 +272,7 @@ export class CubePlexus {
         });
       }
 
-      candidates.sort((left, right) => left.distance - right.distance);
+      shuffleInPlace(candidates);
 
       for (let candidateOffset = 0; candidateOffset < candidates.length; candidateOffset += 1) {
         if (point.connections >= this.maxConnectionsPerPoint || this.connections.length >= this.maxConnections) {
@@ -285,8 +299,8 @@ export class CubePlexus {
 
     this.points.forEach((point, index) => {
       const target = point.connections > 0
-        ? THREE.MathUtils.lerp(0.45, 1, interaction * 0.75 + this.visibleStrength * 0.25)
-        : THREE.MathUtils.lerp(0.04, 0.28, this.visibleStrength * motionGate);
+        ? THREE.MathUtils.lerp(0.24, 0.82, displayMix * 0.92)
+        : THREE.MathUtils.lerp(0.04, 0.12, displayMix * motionGate);
       this.pointStrength[index] = THREE.MathUtils.lerp(this.pointStrength[index], target, 1 - Math.exp(-delta * 10));
       this.pointAlphaAttribute.array[index] = this.pointStrength[index];
     });
@@ -297,7 +311,7 @@ export class CubePlexus {
       const pointA = this.points[connection.pointA];
       const pointB = this.points[connection.pointB];
       const alpha = clamp01(
-        THREE.MathUtils.lerp(0.2, 1, interaction * 0.8 + this.visibleStrength * 0.2)
+        THREE.MathUtils.lerp(0.42, 0.9, this.visibleStrength * 0.8 + this.clickPulse * 0.2)
         * (1 - clamp01(connection.distance / connectionDistance))
       );
 
@@ -325,10 +339,14 @@ export class CubePlexus {
     this.lineAlphaAttribute.needsUpdate = true;
 
     this.group.visible = this.visibleStrength > 0.01 && !this.captureHidden;
-    this.group.scale.setScalar(THREE.MathUtils.lerp(0.9, 1.08, interaction * 0.65 + this.clickPulse * 0.35));
-    this.pointMaterial.uniforms.uOpacity.value = this.visibleStrength * THREE.MathUtils.lerp(0.35, 1, motionGate);
-    this.lineMaterial.uniforms.uOpacity.value = this.visibleStrength * THREE.MathUtils.lerp(0.18, 0.85, motionGate);
-    this.pointMaterial.uniforms.uPointSize.value = THREE.MathUtils.lerp(34, 58, interaction * 0.65 + this.clickPulse * 0.35);
+    this.group.scale.setScalar(THREE.MathUtils.lerp(1, 1.08, this.clickPulse));
+    this.pointMaterial.uniforms.uOpacity.value = clamp01(
+      this.visibleStrength * (0.42 + this.clickPulse * 0.58) * THREE.MathUtils.lerp(0.42, 1, motionGate)
+    );
+    this.lineMaterial.uniforms.uOpacity.value = clamp01(
+      this.visibleStrength * (0.46 + this.clickPulse * 0.54) * THREE.MathUtils.lerp(0.5, 1, motionGate)
+    );
+    this.pointMaterial.uniforms.uPointSize.value = THREE.MathUtils.lerp(18, 34, this.visibleStrength * 0.75 + this.clickPulse * 0.25);
   }
 
   setVisible(visible) {

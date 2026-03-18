@@ -14,6 +14,7 @@ export class AudioDebugGui {
 
     const iglooDebugValues = this.iglooScene?.getIntroDebugSettings?.() ?? {};
     const cubesDebugValues = this.cubesScene?.getLookDebugSettings?.() ?? {};
+    const cubesLabelDebugValues = this.cubesScene?.getLabelDebugSettings?.() ?? {};
     const transitionDebugValues =
       this.homeRenderer?.getTransitionDebugSettings?.() ?? {};
 
@@ -32,13 +33,17 @@ export class AudioDebugGui {
       mountainMaskStart: iglooDebugValues.mountainMaskStart ?? 32,
       mountainMaskEnd: iglooDebugValues.mountainMaskEnd ?? 36,
       cubesLutIntensity: cubesDebugValues.lutIntensity ?? 1,
-      cubesBloomStrength: cubesDebugValues.bloomStrength ?? 0.32,
-      cubesBloomRadius: cubesDebugValues.bloomRadius ?? 0.78,
-      cubesBloomThreshold: cubesDebugValues.bloomThreshold ?? 0.26,
-      cubesBgDotStrength: cubesDebugValues.bgDotStrength ?? 1,
-      cubesBgShapeAlpha: cubesDebugValues.backgroundShapeAlphaScale ?? 0.9,
-      cubesBlurryTextAlpha: cubesDebugValues.blurryTextOpacityScale ?? 0.9,
-      cubesSmokeAlpha: cubesDebugValues.smokeOpacityScale ?? 1,
+      cubesBloomStrength: cubesDebugValues.bloomStrength ?? 0,
+      cubesBloomRadius: cubesDebugValues.bloomRadius ?? 0.62,
+      cubesBloomThreshold: cubesDebugValues.bloomThreshold ?? 0.72,
+      cubesBgDotStrength: cubesDebugValues.bgDotStrength ?? 0.24,
+      cubesBgShapeAlpha: cubesDebugValues.backgroundShapeAlphaScale ?? 0.12,
+      cubesBlurryTextAlpha: cubesDebugValues.blurryTextOpacityScale ?? 0.22,
+      cubesSmokeAlpha: cubesDebugValues.smokeOpacityScale ?? 0.85,
+      cubesLabelsForceShow: cubesLabelDebugValues.forceShow ?? false,
+      cubesLabelsShowAnchors: cubesLabelDebugValues.showAnchors ?? false,
+      cubesLabelsScale: cubesLabelDebugValues.textScaleMultiplier ?? 1,
+      cubesLabelsOpacityFloor: cubesLabelDebugValues.opacityFloor ?? 0,
       homeChromaticStrength:
         transitionDebugValues.homeChromaticStrength ?? 0.58,
       homeEdgeSoftness: transitionDebugValues.homeEdgeSoftness ?? 1
@@ -55,6 +60,11 @@ export class AudioDebugGui {
       },
       resetCubesLook: () => {
         this.cubesScene?.resetLookDebugSettings?.();
+        this.syncValuesFromCubesScene();
+        this.refresh();
+      },
+      resetCubesLabels: () => {
+        this.cubesScene?.resetLabelDebugSettings?.();
         this.syncValuesFromCubesScene();
         this.refresh();
       },
@@ -75,6 +85,7 @@ export class AudioDebugGui {
 
     this.buildIglooIntroFolder();
     this.buildCubesLookFolder();
+    this.buildCubesLabelsFolder();
     this.buildTransitionFolder();
 
     this.syncValuesFromIglooScene();
@@ -200,6 +211,27 @@ export class AudioDebugGui {
     this.addController(folder, this.actions, 'resetCubesLook').name('Reset cubes look');
   }
 
+  buildCubesLabelsFolder() {
+    if (!this.cubesScene) {
+      return;
+    }
+
+    const folder = this.gui.addFolder('Cubes Labels');
+    this.addController(folder, this.values, 'cubesLabelsForceShow').name('Force labels').onChange((value) => {
+      this.cubesScene?.setLabelDebugSetting?.('forceShow', value);
+    });
+    this.addController(folder, this.values, 'cubesLabelsShowAnchors').name('Show anchors').onChange((value) => {
+      this.cubesScene?.setLabelDebugSetting?.('showAnchors', value);
+    });
+    this.addController(folder, this.values, 'cubesLabelsScale', 0.5, 4, 0.01).name('Label scale').onChange((value) => {
+      this.cubesScene?.setLabelDebugSetting?.('textScaleMultiplier', value);
+    });
+    this.addController(folder, this.values, 'cubesLabelsOpacityFloor', 0, 1, 0.01).name('Opacity floor').onChange((value) => {
+      this.cubesScene?.setLabelDebugSetting?.('opacityFloor', value);
+    });
+    this.addController(folder, this.actions, 'resetCubesLabels').name('Reset labels debug');
+  }
+
   syncValuesFromIglooScene() {
     const settings = this.iglooScene?.getIntroDebugSettings?.();
 
@@ -236,6 +268,14 @@ export class AudioDebugGui {
     this.values.cubesBgShapeAlpha = settings.backgroundShapeAlphaScale;
     this.values.cubesBlurryTextAlpha = settings.blurryTextOpacityScale;
     this.values.cubesSmokeAlpha = settings.smokeOpacityScale;
+
+    const labelSettings = this.cubesScene?.getLabelDebugSettings?.();
+    if (labelSettings) {
+      this.values.cubesLabelsForceShow = labelSettings.forceShow;
+      this.values.cubesLabelsShowAnchors = labelSettings.showAnchors;
+      this.values.cubesLabelsScale = labelSettings.textScaleMultiplier;
+      this.values.cubesLabelsOpacityFloor = labelSettings.opacityFloor;
+    }
   }
 
   syncValuesFromHomeRenderer() {

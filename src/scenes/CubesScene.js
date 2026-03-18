@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { CubeSceneLabels } from '../effects/CubeSceneLabels.js';
 import { CubePlexus } from '../effects/CubePlexus.js';
 import { MouseFrostMap } from '../effects/MouseFrostMap.js';
 import { CubeTransmissionMaterial } from '../materials/CubeTransmissionMaterial.js';
@@ -74,29 +75,34 @@ const CUBES_BG_FRAGMENT_SHADER = /* glsl */ `
   }
 
   void main() {
-    vec2 screenUv = vUv;
+    vec2 screenUv = vUv - 0.5;
     screenUv.x *= uAspect;
-    screenUv *= 0.3;
 
-    float t = uTime * 0.075;
-    vec2 offset1 = vec2(-t, t * 0.25);
-    vec2 offset2 = vec2(t, -t * 0.5);
-    offset1.y -= uProgress * 0.65;
+    float t = uTime * 0.04;
+    float mistA = texture2D(tPerlin, screenUv * 0.22 + vec2(-t, t * 0.28)).r;
+    float mistB = texture2D(tPerlin, screenUv * 0.12 + vec2(t * 0.32, -t * 0.16)).r;
+    float mist = mistA * 0.62 + mistB * 0.38;
 
-    float perlin = texture2D(tPerlin, screenUv + offset1).r;
-    perlin += texture2D(tPerlin, screenUv * 0.5 + offset2).r;
-    perlin *= 0.5;
+    float horizon = smoothstep(-0.55, 0.9, vUv.y);
+    float vignette = 1.0 - smoothstep(0.18, 0.92, length((vUv - 0.5) * vec2(1.0, 0.78)) * 1.15);
+    float gradient = clamp(0.32 + mist * 0.3 + horizon * 0.16 + vignette * 0.08, 0.0, 1.0);
+    vec3 color = mix(uColor2, uColor1, gradient);
 
-    vec3 color = mix(uColor1, uColor2, perlin);
-    vec2 dotUv = screenUv * 45.0;
-    dotUv += vec2(0.0, -uProgress * 10.0);
-    float dots = texture2D(tDotPattern, dotUv).r;
-    float dotId = hash12(floor(dotUv));
-    float dotFade = 1.0 - abs(fract(dotId + uTime * 0.1) - 0.5) * 2.0;
-    color += dots * dotFade * uDotStrength;
+    vec2 starUv = vec2((vUv.x - 0.5) * uAspect + 0.5, vUv.y);
+    starUv *= vec2(54.0, 42.0);
+    starUv += vec2(0.0, -uProgress * 4.0);
+    vec2 starCell = floor(starUv);
+    vec2 starLocal = fract(starUv) - 0.5;
+    float starSeed = hash12(starCell + 17.31);
+    float starMask = step(0.986, starSeed);
+    float starSize = mix(0.035, 0.11, hash12(starCell + 2.41));
+    float star = smoothstep(starSize, 0.0, length(starLocal));
+    float twinkle = 0.75 + 0.25 * sin(uTime * 2.0 + hash12(starCell + 9.71) * 6.28318);
+    color += vec3(star * starMask * twinkle * uDotStrength);
 
-    color += getBlueNoise(gl_FragCoord.xy).rgb * 0.05;
-    gl_FragColor = vec4(color, 1.0);
+    vec3 blueNoise = getBlueNoise(gl_FragCoord.xy).rgb - 0.5;
+    color += blueNoise * 0.015;
+    gl_FragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
   }
 `;
 
@@ -526,14 +532,21 @@ const TEXT_CYLINDER_FRAGMENT_SHADER = /* glsl */ `
 `;
 
 const DEFAULT_CUBES_LOOK_SETTINGS = Object.freeze({
-  lutIntensity: 0.42,
-  bloomStrength: 0.08,
-  bloomRadius: 0.68,
-  bloomThreshold: 0.62,
-  bgDotStrength: 0.45,
-  backgroundShapeAlphaScale: 0.3,
-  blurryTextOpacityScale: 0.12,
-  smokeOpacityScale: 1
+  lutIntensity: 0.28,
+  bloomStrength: 0,
+  bloomRadius: 0.62,
+  bloomThreshold: 0.72,
+  bgDotStrength: 0.16,
+  backgroundShapeAlphaScale: 0.08,
+  blurryTextOpacityScale: 0.16,
+  smokeOpacityScale: 0.72
+});
+
+const DEFAULT_CUBES_LABEL_DEBUG_SETTINGS = Object.freeze({
+  forceShow: false,
+  showAnchors: false,
+  textScaleMultiplier: 1,
+  opacityFloor: 0
 });
 
 function clamp01(value) {
@@ -691,7 +704,7 @@ function createTextCylinderMaterial(atlasTexture, options = {}) {
  * 以及给 WebGL HUD 提供的屏幕锚点计算。
  */
 export class CubesScene extends SceneBase {
-  constructor({ assets, projects }) {
+  constructor({ assets, projects, clickLabel = 'Click to explore' }) {
     super({
       name: 'cubes',
       background: '#d7dde8'
@@ -700,7 +713,9 @@ export class CubesScene extends SceneBase {
     // -------- 运行时状态 --------
     this.assets = assets;
     this.projects = projects;
+    this.clickLabel = clickLabel;
     this.lookDebugSettings = { ...DEFAULT_CUBES_LOOK_SETTINGS };
+    this.labelDebugSettings = { ...DEFAULT_CUBES_LABEL_DEBUG_SETTINGS };
     this.time = 0;
     this.cubes = [];
     this.cubeGroups = [];
@@ -708,6 +723,7 @@ export class CubesScene extends SceneBase {
     this.smokeMeshes = [];
     this.smokeMaterials = [];
     this.plexusSystems = [];
+    this.labelSystems = [];
     this.cubeBaseStates = [];
     this.transmissionMaterials = [];
     this.frostMaps = [];
@@ -734,7 +750,17 @@ export class CubesScene extends SceneBase {
     this.anchorClipPosition = new THREE.Vector3();
     this.anchorQuaternion = new THREE.Quaternion();
     this.anchorScale = new THREE.Vector3();
+    this.uiBoundsCenterWorld = new THREE.Vector3();
+    this.uiBoundsEdgeWorldX = new THREE.Vector3();
+    this.uiBoundsEdgeWorldY = new THREE.Vector3();
+    this.uiBoundsCenterClip = new THREE.Vector3();
+    this.uiBoundsEdgeClipX = new THREE.Vector3();
+    this.uiBoundsEdgeClipY = new THREE.Vector3();
+    this.labelWorldPosition = new THREE.Vector3();
+    this.uiCameraRight = new THREE.Vector3();
+    this.uiCameraUp = new THREE.Vector3();
     this.projectGroup = new THREE.Group();
+    this.labelsGroup = new THREE.Group();
     this.verticalOffset = 5.75;
     this.environment = assets.get('texture', 'cubes-environment');
     this.blueNoise = assets.get('texture', 'blue-noise');
@@ -771,6 +797,8 @@ export class CubesScene extends SceneBase {
     this.uiFrameClip = Array.from({ length: 10 }, () => new THREE.Vector3());
 
     this.root.add(this.projectGroup);
+    this.labelsGroup.name = 'cubes-texts';
+    this.add(this.labelsGroup);
 
     // -------- 基础灯光 --------
     const ambient = new THREE.AmbientLight('#f0f4ff', 1.4);
@@ -786,8 +814,8 @@ export class CubesScene extends SceneBase {
           uTime: { value: 0 },
           uProgress: { value: 0 },
           uAspect: { value: 1 },
-          uColor1: { value: new THREE.Color('#c9d0df') },
-          uColor2: { value: new THREE.Color('#545b6b') },
+          uColor1: { value: new THREE.Color('#cfd7e2') },
+          uColor2: { value: new THREE.Color('#8f98a8') },
           tPerlin: { value: assets.get('texture', 'detail-perlin') ?? null },
           tDotPattern: { value: assets.get('texture', 'dot-pattern') ?? null },
           tBlue: { value: this.blueNoise },
@@ -972,7 +1000,7 @@ export class CubesScene extends SceneBase {
       });
 
       material.emissive.set(project.accent);
-      material.emissiveIntensity = 0.04;
+      material.emissiveIntensity = 0.025;
       material.opacity = 1;
 
       const cubeMesh = new THREE.Mesh(geometry, material);
@@ -1006,9 +1034,20 @@ export class CubesScene extends SceneBase {
       smokeMesh.position.y = -0.35;
       const plexus = new CubePlexus({
         color: project.accent,
-        radius: geometry.boundingSphere?.radius ?? 0.82
+        radius: geometry.boundingSphere?.radius ?? 0.82,
+        treadmillDist: 3,
+        totalPoints: 18,
+        maxConnectionsPerPoint: 3
       });
       plexus.group.position.y = -0.02;
+      const labels = new CubeSceneLabels({
+        parent: this.labelsGroup,
+        cube: cubeMesh,
+        project,
+        clickLabel: this.clickLabel,
+        index,
+        debugSettings: this.labelDebugSettings
+      });
 
       cubeGroup.position.y = -(index + 1) * this.verticalOffset;
       cubeGroup.name = `cube-group-${index}`;
@@ -1021,6 +1060,7 @@ export class CubesScene extends SceneBase {
       this.smokeMeshes.push(smokeMesh);
       this.smokeMaterials.push(smokeMaterial);
       this.plexusSystems.push(plexus);
+      this.labelSystems.push(labels);
       this.frostMaps.push(mouseFrost);
       this.transmissionMaterials.push(material);
       this.cubeBaseStates.push({
@@ -1029,7 +1069,8 @@ export class CubesScene extends SceneBase {
         cubeRotation: cubeMesh.rotation.clone(),
         innerRotation: innerMesh.rotation.clone(),
         innerScale: innerMesh.scale.clone(),
-        centeredProgress
+        centeredProgress,
+        runtimeRand: Math.random()
       });
     });
 
@@ -1043,6 +1084,14 @@ export class CubesScene extends SceneBase {
 
   getLookDebugDefaults() {
     return { ...DEFAULT_CUBES_LOOK_SETTINGS };
+  }
+
+  getLabelDebugSettings() {
+    return { ...this.labelDebugSettings };
+  }
+
+  getLabelDebugDefaults() {
+    return { ...DEFAULT_CUBES_LABEL_DEBUG_SETTINGS };
   }
 
   setLookDebugSetting(key, value) {
@@ -1064,6 +1113,30 @@ export class CubesScene extends SceneBase {
       this.roomBackground.material.uniforms.uDotStrength.value =
         this.lookDebugSettings.bgDotStrength;
     }
+  }
+
+  setLabelDebugSetting(key, value) {
+    if (!(key in this.labelDebugSettings)) {
+      return;
+    }
+
+    if (typeof this.labelDebugSettings[key] === 'boolean') {
+      this.labelDebugSettings[key] = Boolean(value);
+      return;
+    }
+
+    if (!Number.isFinite(value)) {
+      return;
+    }
+
+    this.labelDebugSettings[key] = value;
+  }
+
+  resetLabelDebugSettings() {
+    this.labelDebugSettings = { ...DEFAULT_CUBES_LABEL_DEBUG_SETTINGS };
+    this.labelSystems.forEach((labels) => {
+      labels.debugSettings = this.labelDebugSettings;
+    });
   }
 
   getColorCorrectionState() {
@@ -1147,6 +1220,10 @@ export class CubesScene extends SceneBase {
       this.backgroundShapes.visible = !capturing && this.backgroundShapesEnabled && this.backgroundShapesVisible;
     }
 
+    if (this.labelsGroup) {
+      this.labelsGroup.visible = !capturing;
+    }
+
     if (this.blurryText) {
       this.blurryText.visible = !capturing && this.blurryTextVisible;
     }
@@ -1226,13 +1303,8 @@ export class CubesScene extends SceneBase {
   }
 
   setHoveredProject(projectHash = null) {
-    const previousIndex = this.hoveredProjectIndex;
     this.hoveredProjectHash = projectHash;
     this.hoveredProjectIndex = this.projects.findIndex((project) => project.hash === projectHash);
-
-    if (this.hoveredProjectIndex >= 0 && this.hoveredProjectIndex !== previousIndex) {
-      this.plexusSystems[this.hoveredProjectIndex]?.triggerPulse(0.85);
-    }
   }
 
   setPointer(pointer = null) {
@@ -1254,6 +1326,19 @@ export class CubesScene extends SceneBase {
     this.pointerProjectIndex = nextIndex;
 
     if (!hit || !hit.uv || nextIndex < 0) {
+      return;
+    }
+
+    const stackSpan = this.verticalOffset * (this.cubeGroups.length + 1);
+    const scrollOffset = this.progress * stackSpan;
+    const focusOffset = this.detailFocusIndex >= 0
+      ? (
+        (this.cubeBaseStates[this.detailFocusIndex]?.centeredProgress ?? this.progress) - this.progress
+      ) * stackSpan * this.detailFocusProgress
+      : 0;
+    const runtimeScrollDistance = (this.cubeBaseStates[nextIndex]?.position.y ?? 0) + focusOffset + scrollOffset;
+
+    if (this.detailFocusProgress > 0.02 || Math.abs(runtimeScrollDistance) >= 2) {
       return;
     }
 
@@ -1352,9 +1437,15 @@ export class CubesScene extends SceneBase {
   }
 
   getOverlayPresentation() {
+    return {
+      useSceneLabels: true,
+      visible: false,
+      project: null
+    };
     // 给 WebGLUiScene 输出当前激活项目的屏幕锚点与框线点位。
     const { enterProgress, exitProgress } = this.getSectionHandoffState();
     const activeIndex = this.getOverlayProjectIndex();
+    const centeredIndex = this.getCenteredProjectIndex();
     const project = activeIndex >= 0 ? this.projects[activeIndex] : null;
     const cube = activeIndex >= 0 ? this.cubes[activeIndex] : null;
     const state = activeIndex >= 0 ? this.cubeBaseStates[activeIndex] : null;
@@ -1363,8 +1454,14 @@ export class CubesScene extends SceneBase {
       return null;
     }
 
-    const reveal = (1 - smoothWindow(Math.abs(state.centeredProgress - this.progress), 0.08, 0.42))
-      * enterProgress
+    const isCentered = activeIndex === centeredIndex;
+    const hoverReveal = this.hoveredProjectIndex === activeIndex ? 1 : 0;
+    const centeredReveal = isCentered ? 0.84 : 0;
+    const reveal = Math.max(
+      1 - smoothWindow(Math.abs(state.centeredProgress - this.progress), 0.14, 0.72),
+      hoverReveal,
+      centeredReveal
+    ) * enterProgress
       * (1 - exitProgress * 0.92)
       * (1 - this.detailFocusProgress);
 
@@ -1373,7 +1470,8 @@ export class CubesScene extends SceneBase {
     }
 
     const bounds = cube.geometry.boundingBox;
-    if (!bounds) {
+    const sphere = cube.geometry.boundingSphere;
+    if (!bounds || !sphere) {
       return null;
     }
 
@@ -1381,55 +1479,66 @@ export class CubesScene extends SceneBase {
     this.updateMatrixWorld(true);
     cube.updateMatrixWorld(true);
 
-    this.uiAnchorLocalA.set(
-      THREE.MathUtils.lerp(bounds.min.x, bounds.max.x, 0.35),
-      THREE.MathUtils.lerp(bounds.max.y, bounds.min.y, 0.15),
-      THREE.MathUtils.lerp(bounds.min.z, bounds.max.z, 0.93)
-    );
-    this.uiAnchorLocalB.set(
-      THREE.MathUtils.lerp(bounds.min.x, bounds.max.x, 0.7),
-      THREE.MathUtils.lerp(bounds.max.y, bounds.min.y, 0.75),
-      THREE.MathUtils.lerp(bounds.min.z, bounds.max.z, 0.95)
-    );
-    this.uiAnchorLocalC.set(
-      THREE.MathUtils.lerp(bounds.min.x, bounds.max.x, 0.7),
-      THREE.MathUtils.lerp(bounds.max.y, bounds.min.y, 0.15),
-      THREE.MathUtils.lerp(bounds.min.z, bounds.max.z, 0.93)
-    );
+    this.uiBoundsCenterWorld.copy(sphere.center).applyMatrix4(cube.matrixWorld);
+    this.camera.matrixWorld.extractBasis(this.uiCameraRight, this.uiCameraUp, this.anchorWorldPosition);
 
-    this.uiAnchorWorldA.copy(this.uiAnchorLocalA).applyMatrix4(cube.matrixWorld);
-    this.uiAnchorWorldB.copy(this.uiAnchorLocalB).applyMatrix4(cube.matrixWorld);
-    this.uiAnchorWorldC.copy(this.uiAnchorLocalC).applyMatrix4(cube.matrixWorld);
-    this.uiAnchorClipA.copy(this.uiAnchorWorldA).project(this.camera);
-    this.uiAnchorClipB.copy(this.uiAnchorWorldB).project(this.camera);
-    this.uiAnchorClipC.copy(this.uiAnchorWorldC).project(this.camera);
+    cube.getWorldScale(this.anchorScale);
+    const sphereRadius = sphere.radius * Math.max(this.anchorScale.x, this.anchorScale.y, this.anchorScale.z);
 
-    const frameFactors = [
-      [0.18, 0.92, 0.9],
-      [0.34, 1.06, 0.96],
-      [0.68, 1.04, 0.94],
-      [0.96, 0.82, 0.9],
-      [1.08, 0.56, 0.88],
-      [0.92, 0.18, 0.92],
-      [0.72, -0.04, 0.9],
-      [0.28, 0.02, 0.92],
-      [-0.06, 0.26, 0.86],
-      [0.02, 0.72, 0.84]
+    this.uiBoundsEdgeWorldX.copy(this.uiBoundsCenterWorld).addScaledVector(this.uiCameraRight, sphereRadius * 0.9);
+    this.uiBoundsEdgeWorldY.copy(this.uiBoundsCenterWorld).addScaledVector(this.uiCameraUp, sphereRadius * 1.05);
+
+    this.uiBoundsCenterClip.copy(this.uiBoundsCenterWorld).project(this.camera);
+    this.uiBoundsEdgeClipX.copy(this.uiBoundsEdgeWorldX).project(this.camera);
+    this.uiBoundsEdgeClipY.copy(this.uiBoundsEdgeWorldY).project(this.camera);
+
+    if (
+      !Number.isFinite(this.uiBoundsCenterClip.x)
+      || !Number.isFinite(this.uiBoundsCenterClip.y)
+      || !Number.isFinite(this.uiBoundsEdgeClipX.x)
+      || !Number.isFinite(this.uiBoundsEdgeClipY.y)
+    ) {
+      return null;
+    }
+
+    const centerX = this.uiBoundsCenterClip.x;
+    const centerY = this.uiBoundsCenterClip.y;
+    const halfWidth = Math.max(Math.abs(this.uiBoundsEdgeClipX.x - centerX), 0.1);
+    const halfHeight = Math.max(Math.abs(this.uiBoundsEdgeClipY.y - centerY), 0.14);
+    const frameHalfWidth = halfWidth * 1.12;
+    const frameHalfHeight = halfHeight * 1.08;
+    const frameAnchors = [
+      { x: centerX - frameHalfWidth * 0.46, y: centerY + frameHalfHeight },
+      { x: centerX + frameHalfWidth * 0.4, y: centerY + frameHalfHeight },
+      { x: centerX + frameHalfWidth, y: centerY + frameHalfHeight * 0.26 },
+      { x: centerX + frameHalfWidth * 0.9, y: centerY - frameHalfHeight * 0.66 },
+      { x: centerX + frameHalfWidth * 0.16, y: centerY - frameHalfHeight },
+      { x: centerX - frameHalfWidth * 0.5, y: centerY - frameHalfHeight * 0.88 },
+      { x: centerX - frameHalfWidth, y: centerY - frameHalfHeight * 0.08 },
+      { x: centerX - frameHalfWidth * 0.9, y: centerY + frameHalfHeight * 0.56 },
+      { x: centerX - frameHalfWidth * 0.46, y: centerY + frameHalfHeight }
     ];
 
-    frameFactors.forEach((factor, index) => {
-      this.uiFrameLocal[index].set(
-        THREE.MathUtils.lerp(bounds.min.x, bounds.max.x, factor[0]),
-        THREE.MathUtils.lerp(bounds.max.y, bounds.min.y, factor[1]),
-        THREE.MathUtils.lerp(bounds.min.z, bounds.max.z, factor[2])
-      );
-      this.uiFrameWorld[index].copy(this.uiFrameLocal[index]).applyMatrix4(cube.matrixWorld);
-      this.uiFrameClip[index].copy(this.uiFrameWorld[index]).project(this.camera);
-    });
+    this.uiAnchorClipA.set(
+      centerX - frameHalfWidth * 0.02,
+      centerY + frameHalfHeight * 0.34,
+      0
+    );
+    this.uiAnchorClipB.set(
+      centerX + frameHalfWidth * 0.4,
+      centerY - frameHalfHeight * 0.4,
+      0
+    );
+    this.uiAnchorClipC.set(
+      centerX + frameHalfWidth * 0.38,
+      centerY + frameHalfHeight * 0.08,
+      0
+    );
 
     return {
       visible: true,
       reveal,
+      sticky: isCentered,
       hover: this.hoveredProjectIndex === activeIndex ? 1 : 0,
       index: activeIndex,
       project: {
@@ -1447,10 +1556,13 @@ export class CubesScene extends SceneBase {
         x: this.uiAnchorClipC.x,
         y: this.uiAnchorClipC.y
       },
-      frameAnchors: this.uiFrameClip.map((point) => ({
-        x: point.x,
-        y: point.y
-      }))
+      screenBox: {
+        centerX,
+        centerY,
+        halfWidth,
+        halfHeight
+      },
+      frameAnchors
     };
   }
 
@@ -1533,7 +1645,10 @@ export class CubesScene extends SceneBase {
       const isHovered = hoverEnabled && this.hoveredProjectIndex === index;
       const focusProgress = this.detailFocusProgress;
       const hoverProgress = isHovered ? 1 : 0;
-      const frostEnergy = this.frostMaps[index]?.soundVelocity ?? 0;
+      const runtimeScrollDistance = baseState.position.y + focusOffset - cameraTrackY;
+      const frostEnergy = Math.abs(runtimeScrollDistance) < 2 && this.detailFocusProgress < 0.02
+        ? (this.frostMaps[index]?.soundVelocity ?? 0)
+        : 0;
       const centerPresence = 1 - smoothWindow(Math.abs(baseState.centeredProgress - this.progress), 0.1, 0.45);
       const detailHandoffProgress = isFocused
         ? THREE.MathUtils.smoothstep(focusProgress, 0.34, 0.98)
@@ -1544,6 +1659,22 @@ export class CubesScene extends SceneBase {
       const restingX = Math.sin(this.progress * Math.PI + index) * 0.32;
       const focusedX = isFocused ? 0 : spreadDirection * 1.15;
       const settledX = THREE.MathUtils.lerp(restingX, focusedX, focusProgress);
+      const runtimeRand = baseState.runtimeRand ?? 0.5;
+      const firstRuntimeRand = this.cubeBaseStates[0]?.runtimeRand ?? 0.5;
+      const rotationSign = (((index + firstRuntimeRand) * 242.45353) % 1) < 0.5 ? -1 : 1;
+      const rotationScaleX = THREE.MathUtils.lerp(0.1, 0.2, (runtimeRand * 12.3423) % 1);
+      const rotationScaleY = THREE.MathUtils.lerp(0.1, 0.3, (runtimeRand * 123.5343) % 1);
+      const rotationScaleZ = THREE.MathUtils.lerp(0.1, 0.25, (runtimeRand * 54.654) % 1);
+      const scrollProgressDifference = baseState.centeredProgress - this.progress;
+      const additionalRotationAmount = 1 - this.detailFocusProgress;
+      const idleRotationAmplitude = 0.1 * additionalRotationAmount;
+      const idleRotationDirection = Math.sign(runtimeRand - 0.5) || 1;
+      const originalRotationX = (-14 * rotationSign * (1 - rotationScaleY)) * scrollProgressDifference
+        + Math.sin(this.time * 0.3 + runtimeRand * 42.987) * idleRotationAmplitude * idleRotationDirection;
+      const originalRotationY = (11 * rotationSign * (1 - rotationScaleX)) * scrollProgressDifference
+        + Math.sin(this.time * 0.3 + runtimeRand * 12.423) * idleRotationAmplitude * idleRotationDirection;
+      const originalRotationZ = (6 * rotationSign * (1 - rotationScaleZ)) * scrollProgressDifference
+        + Math.sin(this.time * 0.3 + runtimeRand * 2.53) * idleRotationAmplitude * idleRotationDirection;
       const baseScale = THREE.MathUtils.lerp(index === 0 ? 1.08 : 1, isFocused ? 1.4 : 0.72, focusProgress);
       const detailOpacity = THREE.MathUtils.lerp(
         THREE.MathUtils.lerp(THREE.MathUtils.lerp(1, isFocused ? 1 : 0.18, focusProgress), 1, hoverProgress * 0.35),
@@ -1551,7 +1682,7 @@ export class CubesScene extends SceneBase {
         detailHandoffProgress
       );
       const detailZ = THREE.MathUtils.lerp(0, isFocused ? 0.8 : -0.9, focusProgress)
-        + hoverProgress * 0.45
+        + hoverProgress * 0.12
         + detailHandoffProgress * 0.38;
       const enteredX = THREE.MathUtils.lerp(settledX + 1.2 - index * 0.1, settledX, entryStagger);
       const enteredY = baseState.position.y + THREE.MathUtils.lerp(1.45 + index * 0.22, 0, entryStagger);
@@ -1561,30 +1692,30 @@ export class CubesScene extends SceneBase {
       const targetExitZ = -2.8 - index * 0.6;
       const finalScale = baseScale
         * THREE.MathUtils.lerp(0.78, 1, entryStagger)
-        * THREE.MathUtils.lerp(1, 1.14, hoverProgress)
+        * THREE.MathUtils.lerp(1, 1.002, hoverProgress)
         * THREE.MathUtils.lerp(1, 1.06, frostEnergy)
         * THREE.MathUtils.lerp(1, 0.88, detailHandoffProgress)
         * THREE.MathUtils.lerp(1, 0.52, exitStagger);
       const enteredOpacity = THREE.MathUtils.lerp(0.02, detailOpacity, entryStagger);
       const enteredEmissive = Math.max(
-        THREE.MathUtils.lerp(0.02, THREE.MathUtils.lerp(0.04, isFocused ? 0.18 : 0.26, focusProgress) + detailHandoffProgress * 0.08, entryStagger),
-        THREE.MathUtils.lerp(0.04, 0.3, hoverProgress)
+        THREE.MathUtils.lerp(0.01, THREE.MathUtils.lerp(0.02, isFocused ? 0.1 : 0.14, focusProgress) + detailHandoffProgress * 0.04, entryStagger),
+        THREE.MathUtils.lerp(0.02, 0.16, hoverProgress)
       );
       const exitGlow = smoothWindow(exitStagger, 0.08, 0.34) * (1 - smoothWindow(exitStagger, 0.4, 0.82));
-      const rotationMultiplier = (isFocused
-        ? THREE.MathUtils.lerp(1, 0.14, detailHandoffProgress)
-        : 1) * THREE.MathUtils.lerp(0.55, 1, entryStagger) * THREE.MathUtils.lerp(1, 0.22, exitStagger);
-
-      cube.rotation.x += delta * (0.2 + index * 0.03) * rotationMultiplier;
-      cube.rotation.y += delta * (0.25 + index * 0.03) * rotationMultiplier;
-      cube.rotation.z = THREE.MathUtils.lerp(baseState.cubeRotation.z, spreadDirection * 0.08, focusProgress) + Math.sin(this.time * 0.5 + index) * 0.05 * rotationMultiplier;
+      cube.rotation.x = originalRotationX * THREE.MathUtils.lerp(0.6, 1, entryStagger) * THREE.MathUtils.lerp(1, 0.28, exitStagger);
+      cube.rotation.y = originalRotationY * THREE.MathUtils.lerp(0.6, 1, entryStagger) * THREE.MathUtils.lerp(1, 0.28, exitStagger);
+      cube.rotation.z = THREE.MathUtils.lerp(
+        originalRotationZ,
+        originalRotationZ + spreadDirection * 0.06,
+        focusProgress * (1 - detailHandoffProgress)
+      ) * THREE.MathUtils.lerp(0.6, 1, entryStagger) * THREE.MathUtils.lerp(1, 0.24, exitStagger);
 
       innerObject.rotation.x = baseState.innerRotation.x + Math.sin(this.time * 0.8 + index) * 0.08 * (1 - detailHandoffProgress);
       innerObject.rotation.y += delta * (0.18 + index * 0.025) * THREE.MathUtils.lerp(0.75, 1.2, hoverProgress);
       innerObject.rotation.z = baseState.innerRotation.z + Math.sin(this.time * 0.6 + index * 1.7) * 0.06;
       innerObject.position.y = Math.sin(this.time * 1.1 + index) * 0.04 * (1 - detailHandoffProgress);
       innerObject.scale.copy(baseState.innerScale).multiplyScalar(
-        THREE.MathUtils.lerp(0.92, 1.08, hoverProgress) * THREE.MathUtils.lerp(1, 0.86, detailHandoffProgress)
+        THREE.MathUtils.lerp(0.94, 1.015, hoverProgress) * THREE.MathUtils.lerp(1, 0.86, detailHandoffProgress)
       );
       innerObject.material.opacity = THREE.MathUtils.lerp(0.72, 1, hoverProgress) * THREE.MathUtils.lerp(1, 0.35, detailHandoffProgress);
 
@@ -1594,16 +1725,20 @@ export class CubesScene extends SceneBase {
       cubeGroup.scale.setScalar(finalScale);
 
       material.opacity = THREE.MathUtils.lerp(enteredOpacity * THREE.MathUtils.lerp(0.12, 1, centerPresence), 0.02, exitStagger);
-      material.emissiveIntensity = (THREE.MathUtils.lerp(enteredEmissive, 0.08, exitStagger) + exitGlow * 0.22)
+      material.emissiveIntensity = (THREE.MathUtils.lerp(enteredEmissive, 0.05, exitStagger) + exitGlow * 0.12)
         * THREE.MathUtils.lerp(0.35, 1, centerPresence)
-        + frostEnergy * THREE.MathUtils.lerp(0.08, 0.34, hoverProgress * 0.65 + centerPresence * 0.35);
+        + frostEnergy * THREE.MathUtils.lerp(0.04, 0.2, hoverProgress * 0.65 + centerPresence * 0.35);
 
       smokeMaterial.uniforms.uTime.value = this.time;
       smokeMaterial.uniforms.uProgress.value = baseState.centeredProgress - this.progress;
+      const plexusVisibility = (Math.abs(runtimeScrollDistance) < 1.25 ? 1 : 0)
+        * enterProgress
+        * (1 - exitProgress * 0.94)
+        * (1 - detailHandoffProgress * 0.72);
       plexus?.update({
         delta: safeDelta,
         time: this.time,
-        visibility: centerPresence * enterProgress * (1 - exitProgress * 0.94) * (1 - detailHandoffProgress * 0.72),
+        visibility: plexusVisibility,
         hover: hoverProgress,
         focus: isFocused ? focusProgress : 0,
         scrollSpeed: motionBlurAmount
@@ -1642,7 +1777,7 @@ export class CubesScene extends SceneBase {
       this.backgroundShapes.material.uniforms.uTime.value = this.time;
       this.backgroundShapes.material.uniforms.uProgress.value = this.progress;
       this.backgroundShapes.material.uniforms.uAspect.value = this.camera.aspect;
-      this.backgroundShapes.material.uniforms.uAlpha.value = THREE.MathUtils.lerp(0.18, 0.34, enterProgress)
+      this.backgroundShapes.material.uniforms.uAlpha.value = THREE.MathUtils.lerp(0.08, 0.14, enterProgress)
         * this.lookDebugSettings.backgroundShapeAlphaScale
         * (1 - exitProgress * 0.88)
         * (1 - this.detailFocusProgress * 0.82);
@@ -1653,7 +1788,7 @@ export class CubesScene extends SceneBase {
       this.blurryText.material.uniforms.uTime.value = this.time;
       this.blurryText.material.uniforms.uProgress.value = this.progress;
       this.blurryText.material.uniforms.uAspect.value = this.camera.aspect;
-      this.blurryText.material.uniforms.uOpacity.value = THREE.MathUtils.lerp(0.08, 0.16, enterProgress)
+      this.blurryText.material.uniforms.uOpacity.value = THREE.MathUtils.lerp(0.08, 0.18, enterProgress)
         * this.lookDebugSettings.blurryTextOpacityScale
         * (1 - exitProgress * 0.92)
         * (1 - this.detailFocusProgress * 0.78);
@@ -1662,21 +1797,24 @@ export class CubesScene extends SceneBase {
     // -------- 相机与 billboarding 烟雾 --------
     const spatialLayerPresence = backgroundPresence * THREE.MathUtils.lerp(1, 0.42, motionBlurAmount);
 
+    const spatialInteractionPresence = Math.max(hoverPresence * 0.82, this.detailFocusProgress);
+
     if (this.roomRing) {
-      this.roomRing.visible = spatialLayerPresence > 0.01;
+      this.roomRing.visible = spatialLayerPresence > 0.01 && spatialInteractionPresence > 0.02;
       this.roomRing.position.set(
         this.pointerCurrent.x * 0.12 * pointerInfluence,
         cameraTrackY - 0.95 + this.pointerCurrent.y * 0.06 * pointerInfluence,
         -0.2
       );
-      this.roomRing.scale.setScalar(THREE.MathUtils.lerp(1.18, 1.38, hoverPresence * 0.45 + this.detailFocusProgress * 0.55));
+      this.roomRing.scale.setScalar(THREE.MathUtils.lerp(1.06, 1.18, hoverPresence * 0.45 + this.detailFocusProgress * 0.55));
       this.roomRing.material.uniforms.uTime.value = this.time;
       this.roomRing.material.uniforms.uAlpha.value = spatialLayerPresence
-        * THREE.MathUtils.lerp(0.08, 0.24, hoverPresence * 0.55 + this.detailFocusProgress * 0.45);
+        * spatialInteractionPresence
+        * THREE.MathUtils.lerp(0.01, 0.045, hoverPresence * 0.55 + this.detailFocusProgress * 0.45);
     }
 
     if (this.forcefield) {
-      this.forcefield.visible = spatialLayerPresence > 0.01;
+      this.forcefield.visible = spatialLayerPresence > 0.01 && spatialInteractionPresence > 0.02;
       this.forcefield.position.set(
         this.pointerCurrent.x * 0.1 * pointerInfluence,
         cameraTrackY - 0.08,
@@ -1685,13 +1823,14 @@ export class CubesScene extends SceneBase {
       this.forcefield.rotation.y = this.time * 0.12;
       this.forcefield.rotation.z = this.pointerCurrent.x * 0.08 * pointerInfluence;
       this.forcefield.scale.set(
-        THREE.MathUtils.lerp(1.2, 1.34, this.detailFocusProgress),
-        THREE.MathUtils.lerp(0.82, 1.05, hoverPresence * 0.4 + this.detailFocusProgress * 0.6),
-        THREE.MathUtils.lerp(1.2, 1.34, this.detailFocusProgress)
+        THREE.MathUtils.lerp(1.08, 1.22, this.detailFocusProgress),
+        THREE.MathUtils.lerp(0.76, 0.94, hoverPresence * 0.4 + this.detailFocusProgress * 0.6),
+        THREE.MathUtils.lerp(1.08, 1.22, this.detailFocusProgress)
       );
       this.forcefield.material.uniforms.uTime.value = this.time;
       this.forcefield.material.uniforms.uAlpha.value = spatialLayerPresence
-        * THREE.MathUtils.lerp(0.03, 0.1, hoverPresence * 0.55 + this.detailFocusProgress * 0.45);
+        * spatialInteractionPresence
+        * THREE.MathUtils.lerp(0.008, 0.025, hoverPresence * 0.55 + this.detailFocusProgress * 0.45);
     }
 
     this.textCylinders.forEach((mesh, index) => {
@@ -1702,7 +1841,7 @@ export class CubesScene extends SceneBase {
       mesh.rotation.y += delta * (index === 0 ? 0.05 : -0.04);
       mesh.material.uniforms.uTime.value = this.time;
       mesh.material.uniforms.uAlpha.value = spatialLayerPresence
-        * THREE.MathUtils.lerp(opacityBias, opacityBias + 0.1, hoverPresence * 0.55 + this.detailFocusProgress * 0.45);
+        * THREE.MathUtils.lerp(opacityBias * 0.7, opacityBias + 0.04, hoverPresence * 0.55 + this.detailFocusProgress * 0.45);
     });
 
     this.camera.position.x = this.pointerCurrent.x * 0.35 * pointerInfluence;
@@ -1724,6 +1863,34 @@ export class CubesScene extends SceneBase {
     );
     this.camera.updateMatrixWorld();
     this.camera.getWorldQuaternion(this.cameraWorldQuaternion);
+    this.camera.matrixWorld.extractBasis(this.uiCameraRight, this.uiCameraUp, this.anchorWorldPosition);
+
+    this.labelSystems.forEach((labels, index) => {
+      const cubeGroup = this.cubeGroups[index];
+      const baseState = this.cubeBaseStates[index];
+      const isFocused = this.detailFocusIndex === index;
+      const centerPresence = 1 - smoothWindow(Math.abs(baseState.centeredProgress - this.progress), 0.1, 0.45);
+      const detailHandoffProgress = isFocused
+        ? THREE.MathUtils.smoothstep(this.detailFocusProgress, 0.34, 0.98)
+        : 0;
+      const runtimeScrollDistance = baseState.position.y + focusOffset - cameraTrackY;
+
+      cubeGroup.updateMatrixWorld(true);
+      cubeGroup.getWorldPosition(this.labelWorldPosition);
+      labels.update({
+        delta: safeDelta,
+        time: this.time,
+        scrollDistance: runtimeScrollDistance,
+        presence: enterProgress
+          * (1 - exitProgress * 0.92)
+          * (1 - detailHandoffProgress * 0.84),
+        camera: this.camera,
+        cameraQuaternion: this.cameraWorldQuaternion,
+        cameraRight: this.uiCameraRight,
+        cameraUp: this.uiCameraUp,
+        viewportHeight: this.height ?? 1080
+      });
+    });
 
     this.cubeGroups.forEach((cubeGroup, index) => {
       const smokeMesh = this.smokeMeshes[index];
@@ -1743,6 +1910,7 @@ export class CubesScene extends SceneBase {
     this.transmissionTarget.dispose();
     this.frostMaps.forEach((frostMap) => frostMap.dispose());
     this.plexusSystems.forEach((plexus) => plexus.dispose());
+    this.labelSystems.forEach((labels) => labels.dispose());
     this.smokeMeshes.forEach((smokeMesh) => {
       smokeMesh.geometry.dispose();
     });

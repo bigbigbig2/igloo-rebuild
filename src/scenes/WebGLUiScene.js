@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { MsdfTextBlock, loadFontMetrics } from '../ui/msdf.js';
+import { CanvasTextBlock, MsdfTextBlock, loadFontMetrics } from '../ui/msdf.js';
 
 const SPRITE_VERTEX_SHADER = /* glsl */ `
   varying vec2 vUv;
@@ -191,6 +191,12 @@ function ndcToOverlayPoint(ndc, width, height) {
     ndc.x * width * 0.5,
     ndc.y * height * 0.5
   );
+}
+
+function clampOverlayTopLeft(position, blockWidth, blockHeight, width, height, margin = 36) {
+  position.x = clamp(position.x, -width * 0.5 + margin, width * 0.5 - blockWidth - margin);
+  position.y = clamp(position.y, -height * 0.5 + blockHeight + margin, height * 0.5 - margin);
+  return position;
 }
 
 function formatCubesTitle(project) {
@@ -451,33 +457,27 @@ export class WebGLUiScene {
       align: 'left',
       color: '#ffffff'
     });
-    this.textBlocks.cubeTitle = new MsdfTextBlock({
-      fontData: this.fontData,
-      atlasTexture: fontTexture,
+    this.textBlocks.cubeTitle = new CanvasTextBlock({
       text: '',
       maxWidth: 420,
-      fontSize: 30,
-      lineHeight: 0.88,
+      fontSize: 36,
+      lineHeight: 0.92,
       align: 'left',
       color: '#ffffff'
     });
-    this.textBlocks.cubeMeta = new MsdfTextBlock({
-      fontData: this.fontData,
-      atlasTexture: fontTexture,
+    this.textBlocks.cubeMeta = new CanvasTextBlock({
       text: '',
       maxWidth: 300,
       fontSize: 24,
-      lineHeight: 0.88,
+      lineHeight: 0.94,
       align: 'right',
       color: '#ffffff'
     });
-    this.textBlocks.cubeTemp = new MsdfTextBlock({
-      fontData: this.fontData,
-      atlasTexture: fontTexture,
+    this.textBlocks.cubeTemp = new CanvasTextBlock({
       text: '',
       maxWidth: 220,
       fontSize: 20,
-      lineHeight: 0.9,
+      lineHeight: 0.92,
       align: 'left',
       color: '#ffffff'
     });
@@ -486,6 +486,9 @@ export class WebGLUiScene {
     this.manifestoGroup.add(this.textBlocks.manifestoLabel.mesh, this.textBlocks.manifestoText.mesh);
     this.soundGroup.add(this.textBlocks.soundLabel.mesh, this.textBlocks.soundValue.mesh);
     this.cubesGroup.add(this.textBlocks.cubeTitle.mesh, this.textBlocks.cubeMeta.mesh, this.textBlocks.cubeTemp.mesh);
+    this.textBlocks.cubeTitle.mesh.renderOrder = 1004;
+    this.textBlocks.cubeMeta.mesh.renderOrder = 1004;
+    this.textBlocks.cubeTemp.mesh.renderOrder = 1004;
 
     this.readyState = 'ready';
     this.layout();
@@ -616,6 +619,14 @@ export class WebGLUiScene {
       && this.state.activeSectionKey === 'cubes'
       && !this.state.hasProject;
 
+    if (presentation?.useSceneLabels) {
+      this.cubesGroup.visible = false;
+      Object.values(this.cubesLines).forEach((line) => {
+        line.visible = false;
+      });
+      return;
+    }
+
     if (!isCubesHome || !presentation?.visible) {
       this.cubesGroup.visible = false;
       Object.values(this.cubesLines).forEach((line) => {
@@ -631,39 +642,63 @@ export class WebGLUiScene {
     const height = this.size.height;
     const mobile = width < 760 || height < 680;
     const small = width < 1180 || height < 820;
-    const scale = mobile ? 0.74 : small ? 0.88 : 1;
-    const baseReveal = clamp(presentation.reveal ?? 0, 0, 1);
-    const runtimeReveal = this.cubesOverlay.revealClock;
-    const frameReveal = baseReveal * rangeProgress(runtimeReveal, 0.0, 0.26);
-    const titleReveal = baseReveal * rangeProgress(runtimeReveal, 0.02, 0.38);
-    const metaReveal = baseReveal * rangeProgress(runtimeReveal, 0.18, 0.56);
-    const tempReveal = baseReveal * rangeProgress(runtimeReveal, 0.38, 0.84);
+    const scale = mobile ? 0.82 : small ? 0.94 : 1.04;
+    const stickyFloor = presentation.sticky ? 0.94 : 0.28;
+    const baseReveal = smoothStep01(clamp(Math.max(presentation.reveal ?? 0, stickyFloor), 0, 1));
+    const runtimeReveal = clamp(Math.max(this.cubesOverlay.revealClock, baseReveal), 0, 1);
+    const frameReveal = presentation.sticky ? 1 : baseReveal * rangeProgress(runtimeReveal, 0.0, 0.18);
+    const titleReveal = presentation.sticky ? 1 : baseReveal * rangeProgress(runtimeReveal, 0.0, 0.22);
+    const metaReveal = presentation.sticky ? 1 : baseReveal * rangeProgress(runtimeReveal, 0.04, 0.28);
+    const tempReveal = presentation.sticky ? 1 : baseReveal * rangeProgress(runtimeReveal, 0.08, 0.32);
     const hoverMix = clamp(presentation.hover ?? 0, 0, 1);
-    const hoverPulse = 1 + hoverMix * (Math.sin(this.elapsed * 6 + (presentation.index ?? 0) * 0.75) * 0.06);
     const titleAnchor = ndcToOverlayPoint(presentation.titleAnchor, width, height);
     const dateAnchor = ndcToOverlayPoint(presentation.dateAnchor, width, height);
     const tempAnchor = ndcToOverlayPoint(presentation.tempAnchor, width, height);
+    const screenBoxHalfWidth = Math.max((presentation.screenBox?.halfWidth ?? 0.14) * width * 0.5, 72 * scale);
+    const screenBoxHalfHeight = Math.max((presentation.screenBox?.halfHeight ?? 0.18) * height * 0.5, 92 * scale);
     const frameAnchors = (presentation.frameAnchors ?? []).map((point) => ndcToOverlayPoint(point, width, height));
-    const drift = Math.sin(this.elapsed * 1.9 + (presentation.index ?? 0) * 0.7) * 4 * scale;
+    const drift = Math.sin(this.elapsed * 1.9 + (presentation.index ?? 0) * 0.7) * 1.2 * scale;
     const titlePosition = new THREE.Vector2(
-      titleAnchor.x - 188 * scale,
-      titleAnchor.y + 116 * scale + drift * 0.3
+      titleAnchor.x - screenBoxHalfWidth - 56 * scale,
+      titleAnchor.y + screenBoxHalfHeight * 0.24 + 10 * scale + drift * 0.1
     );
     const datePosition = new THREE.Vector2(
-      dateAnchor.x + 126 * scale,
-      dateAnchor.y - 18 * scale - drift * 0.12
+      dateAnchor.x + screenBoxHalfWidth * 0.16 + 18 * scale,
+      dateAnchor.y - screenBoxHalfHeight * 0.46 - 4 * scale - drift * 0.04
     );
     const tempPosition = new THREE.Vector2(
-      tempAnchor.x + 116 * scale,
-      tempAnchor.y + 72 * scale + drift * 0.22
+      tempAnchor.x + screenBoxHalfWidth * 0.16 + 20 * scale,
+      tempAnchor.y + screenBoxHalfHeight * 0.08 + 2 * scale + drift * 0.08
     );
     const titleElbow = new THREE.Vector2(
-      titleAnchor.x - 68 * scale,
-      titleAnchor.y + 56 * scale + drift * 0.16
+      titleAnchor.x - screenBoxHalfWidth * 0.18,
+      titleAnchor.y + screenBoxHalfHeight * 0.18 + drift * 0.05
     );
     const dateElbow = new THREE.Vector2(
-      dateAnchor.x + 84 * scale,
-      dateAnchor.y - 14 * scale - drift * 0.08
+      dateAnchor.x + screenBoxHalfWidth * 0.12,
+      dateAnchor.y - screenBoxHalfHeight * 0.18 - drift * 0.03
+    );
+
+    clampOverlayTopLeft(
+      titlePosition,
+      this.textBlocks.cubeTitle.size.width * scale,
+      this.textBlocks.cubeTitle.size.height * scale,
+      width,
+      height
+    );
+    clampOverlayTopLeft(
+      datePosition,
+      this.textBlocks.cubeMeta.size.width * scale,
+      this.textBlocks.cubeMeta.size.height * scale,
+      width,
+      height
+    );
+    clampOverlayTopLeft(
+      tempPosition,
+      this.textBlocks.cubeTemp.size.width * scale,
+      this.textBlocks.cubeTemp.size.height * scale,
+      width,
+      height
     );
 
     this.textBlocks.cubeTitle.mesh.scale.set(scale, scale, 1);
@@ -671,24 +706,24 @@ export class WebGLUiScene {
     this.textBlocks.cubeTemp.mesh.scale.set(scale, scale, 1);
 
     this.textBlocks.cubeTitle.mesh.position.set(
-      titlePosition.x - (1 - titleReveal) * 12 * scale,
-      titlePosition.y + (1 - titleReveal) * 14 * scale,
+      titlePosition.x - (1 - titleReveal) * 6 * scale,
+      titlePosition.y + (1 - titleReveal) * 6 * scale,
       0
     );
     this.textBlocks.cubeMeta.mesh.position.set(
-      datePosition.x + (1 - metaReveal) * 10 * scale,
-      datePosition.y - (1 - metaReveal) * 12 * scale,
+      datePosition.x + (1 - metaReveal) * 5 * scale,
+      datePosition.y - (1 - metaReveal) * 6 * scale,
       0
     );
     this.textBlocks.cubeTemp.mesh.position.set(
-      tempPosition.x + (1 - tempReveal) * 6 * scale,
-      tempPosition.y + (1 - tempReveal) * 10 * scale,
+      tempPosition.x + (1 - tempReveal) * 4 * scale,
+      tempPosition.y + (1 - tempReveal) * 4 * scale,
       0
     );
 
-    this.textBlocks.cubeTitle.setOpacity(titleReveal);
-    this.textBlocks.cubeMeta.setOpacity(metaReveal);
-    this.textBlocks.cubeTemp.setOpacity(clamp(tempReveal * 0.9 * hoverPulse, 0, 1));
+    this.textBlocks.cubeTitle.setOpacity(clamp(Math.max(titleReveal, presentation.sticky ? 1 : 0.42), 0, 1));
+    this.textBlocks.cubeMeta.setOpacity(clamp(Math.max(metaReveal, presentation.sticky ? 0.96 : 0.36), 0, 1));
+    this.textBlocks.cubeTemp.setOpacity(clamp(Math.max(tempReveal, presentation.sticky ? 0.88 : 0.3), 0, 1));
 
     const titlePolyline = [
       titleAnchor,
@@ -710,7 +745,7 @@ export class WebGLUiScene {
     if (trimmedFrameLine.length >= 2) {
       setLinePoints(this.cubesLines.frame, trimmedFrameLine);
       this.cubesLines.frame.visible = true;
-      this.cubesLines.frame.material.opacity = frameReveal * THREE.MathUtils.lerp(0.28, 0.4, hoverMix);
+      this.cubesLines.frame.material.opacity = clamp(Math.max(frameReveal, presentation.sticky ? 0.76 : 0.26), 0, 1);
     } else {
       this.cubesLines.frame.visible = false;
     }
@@ -718,7 +753,7 @@ export class WebGLUiScene {
     if (trimmedTitleLine.length >= 2) {
       setLinePoints(this.cubesLines.title, trimmedTitleLine);
       this.cubesLines.title.visible = true;
-      this.cubesLines.title.material.opacity = titleReveal * THREE.MathUtils.lerp(0.84, 1, hoverMix);
+      this.cubesLines.title.material.opacity = clamp(Math.max(titleReveal, presentation.sticky ? 0.94 : 0.34), 0, 1);
     } else {
       this.cubesLines.title.visible = false;
     }
@@ -726,7 +761,7 @@ export class WebGLUiScene {
     if (trimmedDateLine.length >= 2) {
       setLinePoints(this.cubesLines.date, trimmedDateLine);
       this.cubesLines.date.visible = true;
-      this.cubesLines.date.material.opacity = metaReveal * THREE.MathUtils.lerp(0.78, 0.92, hoverMix);
+      this.cubesLines.date.material.opacity = clamp(Math.max(metaReveal, presentation.sticky ? 0.9 : 0.3), 0, 1);
     } else {
       this.cubesLines.date.visible = false;
     }

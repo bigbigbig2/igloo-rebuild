@@ -32,7 +32,7 @@ export class CubeTransmissionMaterial extends THREE.MeshPhysicalMaterial {
       uTransmissionSamplerSize: { value: new THREE.Vector2(1, 1) },
       uResolution: { value: new THREE.Vector2(1, 1) },
       uBlueOffset: { value: new THREE.Vector2(0, 0) },
-      uChromaticAberration: { value: 0.055 },
+      uChromaticAberration: { value: 0.03 },
       uColorFrost: { value: new THREE.Color(frostColor) }
     };
 
@@ -102,32 +102,84 @@ export class CubeTransmissionMaterial extends THREE.MeshPhysicalMaterial {
       );
 
       shader.fragmentShader = shader.fragmentShader.replace(
-        'vec3 outgoingLight = totalDiffuse + totalSpecular + totalEmissiveRadiance;',
+        '#include <clipping_planes_fragment>',
         `
         vec2 frostUv = fract(vCubeUv);
         vec2 mouseFrostData = texture2D(tMouseFrost, frostUv).rg;
         float mouseFrost = mouseFrostData.r;
         float mouseFrostRim = mouseFrostData.g;
+        #include <clipping_planes_fragment>
+        `
+      );
+
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <roughnessmap_fragment>',
+        `
+        float roughnessFactor = roughness;
+        roughnessFactor *= 1.0 - mouseFrost;
+
+        #ifdef USE_ROUGHNESSMAP
+          vec4 texelRoughness = texture2D( roughnessMap, vRoughnessMapUv );
+          roughnessFactor *= texelRoughness.g;
+        #endif
+        `
+      );
+
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <normal_fragment_maps>',
+        `
+        #ifdef USE_NORMALMAP_OBJECTSPACE
+          normal = texture2D( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0;
+
+          #ifdef FLIP_SIDED
+            normal = - normal;
+          #endif
+
+          #ifdef DOUBLE_SIDED
+            normal = normal * faceDirection;
+          #endif
+
+          normal = normalize( normalMatrix * normal );
+        #elif defined( USE_NORMALMAP_TANGENTSPACE )
+          vec3 mapN = texture2D( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0;
+          mapN.xy *= normalScale;
+          mapN.xy *= 1.0 - mouseFrost * 0.85;
+          normal = normalize( tbn * mapN );
+        #elif defined( USE_BUMPMAP )
+          normal = perturbNormalArb( - vViewPosition, normal, dHdxy_fwd(), faceDirection );
+        #endif
+        `
+      );
+
+      shader.fragmentShader = shader.fragmentShader.replace(
+        'vec3 outgoingLight = totalDiffuse + totalSpecular + totalEmissiveRadiance;',
+        `
         float triangleScale = 9.0 * min(1.0, uResolution.y / 1300.0);
         float trianglePattern = texture2D(tTriangles, fract(vCubeUv * triangleScale)).r;
         vec2 screenUv = gl_FragCoord.xy / max(uResolution, vec2(1.0));
         vec4 blueNoise = getBlueNoise(gl_FragCoord.xy, uBlueOffset);
         float distortionNoise = (blueNoise.r - 0.5) * 0.03;
-        vec2 distortion = normal.xy * (0.085 + roughnessFactor * (1.0 - mouseFrost * 0.65) * 0.14);
-        distortion += mouseFrost * 0.025;
-        distortion += vec2(distortionNoise, (blueNoise.g - 0.5) * 0.02);
+        float frostSuppression = 1.0 - mouseFrost * 0.78;
+        vec2 distortion = normal.xy * (0.04 + roughnessFactor * roughnessFactor * 0.1 * frostSuppression);
+        distortion += mouseFrost * 0.018;
+        distortion += vec2(distortionNoise, (blueNoise.g - 0.5) * 0.016);
 
         float fresnel = pow(1.0 - clamp(dot(normalize(normal), normalize(vViewPosition)), 0.0, 1.0), 2.0);
-        vec3 transmitted = sampleTransmission(screenUv, distortion * (1.0 - fresnel * 0.2));
-        vec3 shellTint = diffuseColor.rgb * (0.12 + fresnel * 0.18);
-        vec3 frostGlow = uColorFrost * mouseFrostRim;
-        frostGlow += uColorFrost * trianglePattern * mouseFrostRim * 1.75;
-        frostGlow += vec3(trianglePattern * mouseFrost * mouseFrost * 0.35);
-        vec3 outgoingLight = mix(
-          totalDiffuse + totalSpecular + totalEmissiveRadiance,
-          transmitted + shellTint + totalSpecular * 0.45 + totalEmissiveRadiance + frostGlow,
-          0.56
-        );
+        vec3 transmitted = sampleTransmission(screenUv, distortion * (1.0 - fresnel * 0.12));
+        transmitted = pow(max(transmitted, vec3(0.0)), vec3(1.08));
+
+        vec3 shellShadow = diffuseColor.rgb * (0.035 + (1.0 - fresnel) * 0.08);
+        vec3 shellRim = vec3(1.0) * fresnel * 0.095;
+        vec3 frostGlow = uColorFrost * mouseFrostRim * 0.65;
+        frostGlow += uColorFrost * trianglePattern * mouseFrostRim * 1.35;
+        frostGlow += vec3(trianglePattern * mouseFrost * mouseFrost * 0.2);
+
+        vec3 outgoingLight = transmitted * 1.06
+          + totalSpecular * 0.72
+          + totalEmissiveRadiance
+          + shellRim
+          + frostGlow
+          - shellShadow;
         outgoingLight = clamp(outgoingLight, vec3(0.0), vec3(1.0));
         `
       );
