@@ -3,7 +3,6 @@ import { EventBus } from './core/EventBus.js';
 import { Router } from './core/Router.js';
 import { Engine } from './core/Engine.js';
 import { SiteController } from './controllers/SiteController.js';
-import { AudioDebugGui } from './debug/AudioDebugGui.js';
 
 const BOOT_LOADER_HIDE_DURATION_MS = 750;
 
@@ -101,7 +100,6 @@ bus.on('assets:progress', ({ loaded, total, group, key }) => {
 async function bootstrap() {
   try {
     await controller.init();
-    audioDebugGui = new AudioDebugGui({ controller });
     await hideBootLoader();
     router.start();
     window.controller = controller;

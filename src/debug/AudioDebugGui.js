@@ -40,10 +40,7 @@ export class AudioDebugGui {
       cubesBgShapeAlpha: cubesDebugValues.backgroundShapeAlphaScale ?? 0.12,
       cubesBlurryTextAlpha: cubesDebugValues.blurryTextOpacityScale ?? 0.22,
       cubesSmokeAlpha: cubesDebugValues.smokeOpacityScale ?? 0.85,
-      cubesLabelsForceShow: cubesLabelDebugValues.forceShow ?? false,
-      cubesLabelsShowAnchors: cubesLabelDebugValues.showAnchors ?? false,
-      cubesLabelsScale: cubesLabelDebugValues.textScaleMultiplier ?? 1,
-      cubesLabelsOpacityFloor: cubesLabelDebugValues.opacityFloor ?? 0,
+      cubesLabelsScale: cubesLabelDebugValues.textScaleMultiplier ?? 0.5,
       homeChromaticStrength:
         transitionDebugValues.homeChromaticStrength ?? 0.58,
       homeEdgeSoftness: transitionDebugValues.homeEdgeSoftness ?? 1
@@ -217,17 +214,8 @@ export class AudioDebugGui {
     }
 
     const folder = this.gui.addFolder('Cubes Labels');
-    this.addController(folder, this.values, 'cubesLabelsForceShow').name('Force labels').onChange((value) => {
-      this.cubesScene?.setLabelDebugSetting?.('forceShow', value);
-    });
-    this.addController(folder, this.values, 'cubesLabelsShowAnchors').name('Show anchors').onChange((value) => {
-      this.cubesScene?.setLabelDebugSetting?.('showAnchors', value);
-    });
     this.addController(folder, this.values, 'cubesLabelsScale', 0.5, 4, 0.01).name('Label scale').onChange((value) => {
       this.cubesScene?.setLabelDebugSetting?.('textScaleMultiplier', value);
-    });
-    this.addController(folder, this.values, 'cubesLabelsOpacityFloor', 0, 1, 0.01).name('Opacity floor').onChange((value) => {
-      this.cubesScene?.setLabelDebugSetting?.('opacityFloor', value);
     });
     this.addController(folder, this.actions, 'resetCubesLabels').name('Reset labels debug');
   }
@@ -271,10 +259,7 @@ export class AudioDebugGui {
 
     const labelSettings = this.cubesScene?.getLabelDebugSettings?.();
     if (labelSettings) {
-      this.values.cubesLabelsForceShow = labelSettings.forceShow;
-      this.values.cubesLabelsShowAnchors = labelSettings.showAnchors;
       this.values.cubesLabelsScale = labelSettings.textScaleMultiplier;
-      this.values.cubesLabelsOpacityFloor = labelSettings.opacityFloor;
     }
   }
 

@@ -98,6 +98,27 @@ function setLinePoints(line, points = []) {
   line.geometry.setDrawRange(0, points.length);
 }
 
+function createOverlayLine() {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(12), 3));
+  geometry.setDrawRange(0, 0);
+
+  const material = new THREE.LineBasicMaterial({
+    color: '#ffffff',
+    transparent: true,
+    opacity: 0,
+    depthTest: false,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    toneMapped: false
+  });
+
+  const line = new THREE.Line(geometry, material);
+  line.frustumCulled = false;
+  line.renderOrder = 999;
+  return line;
+}
+
 function formatCubesTitle(project) {
   const label = `${project?.originalTitle ?? project?.title ?? ''}`.toUpperCase();
   return label.replace(/^(\S+)\s+/, '$1\n');
@@ -118,62 +139,6 @@ function formatCubeTemperature(baseTemp = 0, elapsed = 0, seed = 0) {
   return `TEMP  ${fahrenheitLabel}\n${celsiusLabel}`;
 }
 
-function createOverlayLine() {
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(9), 3));
-  geometry.setDrawRange(0, 0);
-
-  const material = new THREE.LineBasicMaterial({
-    color: '#ffffff',
-    transparent: true,
-    opacity: 0,
-    depthTest: false,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-    toneMapped: false
-  });
-
-  const line = new THREE.Line(geometry, material);
-  line.frustumCulled = false;
-  line.renderOrder = 999;
-  return line;
-}
-
-function createDebugPoint(color = '#ff00ff') {
-  const mesh = new THREE.Mesh(
-    new THREE.SphereGeometry(0.04, 8, 8),
-    new THREE.MeshBasicMaterial({
-      color,
-      depthTest: false,
-      depthWrite: false,
-      toneMapped: false
-    })
-  );
-  mesh.visible = false;
-  mesh.renderOrder = 1200;
-  mesh.frustumCulled = false;
-  return mesh;
-}
-
-function createDebugBackplate(color = '#ff00ff') {
-  const mesh = new THREE.Mesh(
-    new THREE.PlaneGeometry(1, 1),
-    new THREE.MeshBasicMaterial({
-      color,
-      transparent: true,
-      opacity: 0.16,
-      depthTest: false,
-      depthWrite: false,
-      toneMapped: false,
-      side: THREE.DoubleSide
-    })
-  );
-  mesh.visible = false;
-  mesh.renderOrder = 1090;
-  mesh.frustumCulled = false;
-  return mesh;
-}
-
 export class CubeSceneLabels {
   constructor({
     parent,
@@ -190,28 +155,27 @@ export class CubeSceneLabels {
     this.index = index;
     this.debugSettings = debugSettings ?? {};
     this.visible = true;
+    this.isHiding = false;
+
     this.titleLineProgress = 0;
-    this.titleTextProgress = 0;
     this.metaLineProgress = 0;
+    this.titleTextProgress = 0;
     this.metaTextProgress = 0;
     this.tempTextProgress = 0;
     this.tempKey = '';
-    this.tempAnchor = new THREE.Vector3();
+
     this.titleAnchor = new THREE.Vector3();
     this.titleElbow = new THREE.Vector3();
     this.titleLabel = new THREE.Vector3();
     this.metaAnchor = new THREE.Vector3();
     this.metaLabel = new THREE.Vector3();
+    this.tempAnchor = new THREE.Vector3();
     this.tempLabel = new THREE.Vector3();
     this.localBoundsAnchor = new THREE.Vector3();
-    this.titleClip = new THREE.Vector3();
-    this.metaClip = new THREE.Vector3();
-    this.tempClip = new THREE.Vector3();
-    this.lastDebugLogAt = -Infinity;
 
     this.titleText = new CanvasTextBlock({
       text: formatCubesTitle(project),
-      maxWidth: 320,
+      maxWidth: 340,
       fontSize: 26,
       lineHeight: 0.95,
       align: 'left',
@@ -220,10 +184,11 @@ export class CubeSceneLabels {
       paddingY: 8
     });
     this.titleText.mesh.renderOrder = 1100;
+
     this.metaText = new CanvasTextBlock({
       text: formatCubesMeta(project, clickLabel),
-      maxWidth: 260,
-      fontSize: 22,
+      maxWidth: 280,
+      fontSize: 23,
       lineHeight: 0.95,
       align: 'right',
       color: '#ffffff',
@@ -231,9 +196,10 @@ export class CubeSceneLabels {
       paddingY: 8
     });
     this.metaText.mesh.renderOrder = 1100;
+
     this.tempText = new CanvasTextBlock({
       text: formatCubeTemperature(project?.temp ?? 0, 0, index),
-      maxWidth: 220,
+      maxWidth: 230,
       fontSize: 22,
       lineHeight: 0.95,
       align: 'left',
@@ -245,28 +211,13 @@ export class CubeSceneLabels {
 
     this.titleLine = createOverlayLine();
     this.metaLine = createOverlayLine();
-    this.debugBackplates = {
-      title: createDebugBackplate('#ff4d6d'),
-      meta: createDebugBackplate('#00bbf9'),
-      temp: createDebugBackplate('#b388ff')
-    };
-    this.debugPoints = {
-      titleAnchor: createDebugPoint('#ff4d6d'),
-      titleLabel: createDebugPoint('#ffd166'),
-      metaAnchor: createDebugPoint('#00bbf9'),
-      metaLabel: createDebugPoint('#9bffb0'),
-      tempAnchor: createDebugPoint('#b388ff'),
-      tempLabel: createDebugPoint('#ffffff')
-    };
 
     [
       this.titleText.mesh,
       this.metaText.mesh,
       this.tempText.mesh,
       this.titleLine,
-      this.metaLine,
-      ...Object.values(this.debugBackplates),
-      ...Object.values(this.debugPoints)
+      this.metaLine
     ].forEach((object) => {
       object.visible = false;
       this.parent.add(object);
@@ -278,7 +229,6 @@ export class CubeSceneLabels {
     time = 0,
     scrollDistance = 0,
     presence = 1,
-    camera = null,
     cameraQuaternion,
     cameraRight,
     cameraUp,
@@ -292,30 +242,16 @@ export class CubeSceneLabels {
       return;
     }
 
-    const forceShow = Boolean(this.debugSettings.forceShow);
-    const showAnchors = Boolean(this.debugSettings.showAnchors);
-    const scaleMultiplier = this.debugSettings.textScaleMultiplier ?? 1;
-    const opacityFloor = clamp01(this.debugSettings.opacityFloor ?? 0);
-    const debugFloor = forceShow ? Math.max(opacityFloor, 0.72) : opacityFloor;
-    const presenceMix = forceShow ? 1 : clamp01(presence);
-    const titleWindow = forceShow || (
-      presenceMix > 0.02
-      && (1 - Math.abs(fit(scrollDistance, -1.6, 0.5, -1, 1))) > 0
-    );
-    const metaWindow = forceShow || (
-      presenceMix > 0.02
-      && (1 - Math.abs(fit(scrollDistance, -0.6, 1.25, -1, 1))) > 0
-    );
-    const tempWindow = forceShow || (
-      presenceMix > 0.02
-      && (1 - Math.abs(fit(scrollDistance, -1.2, 0.5, -1, 1))) > 0
-    );
+    const titleWindow = 1 - Math.abs(fit(scrollDistance, -1.6, 0.5, -1, 1));
+    const metaWindow = 1 - Math.abs(fit(scrollDistance, -0.6, 1.25, -1, 1));
+    const tempWindow = 1 - Math.abs(fit(scrollDistance, -1.2, 0.5, -1, 1));
+    const visibility = clamp01(presence);
 
-    this.titleLineProgress = approach(this.titleLineProgress, titleWindow ? 1 : 0, delta, 0.2);
-    this.titleTextProgress = approach(this.titleTextProgress, titleWindow ? 1 : 0, delta, 0.4);
-    this.metaLineProgress = approach(this.metaLineProgress, metaWindow ? 1 : 0, delta, 0.2);
-    this.metaTextProgress = approach(this.metaTextProgress, metaWindow ? 1 : 0, delta, 0.4);
-    this.tempTextProgress = approach(this.tempTextProgress, tempWindow ? 1 : 0, delta, 0.4);
+    this.titleLineProgress = approach(this.titleLineProgress, titleWindow > 0 ? 1 : 0, delta, 0.2);
+    this.metaLineProgress = approach(this.metaLineProgress, metaWindow > 0 ? 1 : 0, delta, 0.2);
+    this.titleTextProgress = approach(this.titleTextProgress, titleWindow > 0 ? 1 : 0, delta, 0.4);
+    this.metaTextProgress = approach(this.metaTextProgress, metaWindow > 0 ? 1 : 0, delta, 0.4);
+    this.tempTextProgress = approach(this.tempTextProgress, tempWindow > 0 ? 1 : 0, delta, 0.4);
 
     const tempText = formatCubeTemperature(this.project?.temp ?? 0, time, this.index);
     if (tempText !== this.tempKey) {
@@ -323,7 +259,8 @@ export class CubeSceneLabels {
       this.tempText.setText(tempText);
     }
 
-    const textScale = Math.min(0.0064, 0.0046 * (1300 / Math.max(viewportHeight, 1))) * scaleMultiplier;
+    const scaleMultiplier = this.debugSettings.textScaleMultiplier ?? 0.5;
+    const textScale = Math.min(0.8, 0.5 / (Math.max(viewportHeight, 1) / 1300)) * 0.01 * scaleMultiplier;
 
     this.titleText.mesh.quaternion.copy(cameraQuaternion);
     this.metaText.mesh.quaternion.copy(cameraQuaternion);
@@ -359,15 +296,6 @@ export class CubeSceneLabels {
     );
     this.tempAnchor.copy(this.localBoundsAnchor).applyMatrix4(this.cube.matrixWorld);
     this.tempLabel.copy(this.tempAnchor).addScaledVector(cameraRight, 0.3);
-    this.debugPoints.titleAnchor.position.copy(this.titleAnchor);
-    this.debugPoints.titleLabel.position.copy(this.titleLabel);
-    this.debugPoints.metaAnchor.position.copy(this.metaAnchor);
-    this.debugPoints.metaLabel.position.copy(this.metaLabel);
-    this.debugPoints.tempAnchor.position.copy(this.tempAnchor);
-    this.debugPoints.tempLabel.position.copy(this.tempLabel);
-    Object.values(this.debugPoints).forEach((point) => {
-      point.visible = showAnchors;
-    });
 
     const titlePoints = trimPolyline(
       [this.titleAnchor, this.titleElbow, this.titleLabel],
@@ -378,18 +306,18 @@ export class CubeSceneLabels {
       this.metaLineProgress
     );
 
-    if (titlePoints.length >= 2 && this.titleLineProgress > 0.01) {
+    if (titlePoints.length >= 2 && this.titleLineProgress > 0.01 && visibility > 0.01) {
       setLinePoints(this.titleLine, titlePoints);
       this.titleLine.visible = true;
-      this.titleLine.material.opacity = Math.max(this.titleLineProgress * presenceMix, titleWindow ? debugFloor : 0);
+      this.titleLine.material.opacity = this.titleLineProgress * visibility;
     } else {
       this.titleLine.visible = false;
     }
 
-    if (metaPoints.length >= 2 && this.metaLineProgress > 0.01) {
+    if (metaPoints.length >= 2 && this.metaLineProgress > 0.01 && visibility > 0.01) {
       setLinePoints(this.metaLine, metaPoints);
       this.metaLine.visible = true;
-      this.metaLine.material.opacity = Math.max(this.metaLineProgress * presenceMix, metaWindow ? debugFloor : 0);
+      this.metaLine.material.opacity = this.metaLineProgress * visibility;
     } else {
       this.metaLine.visible = false;
     }
@@ -397,82 +325,14 @@ export class CubeSceneLabels {
     this.titleText.mesh.position.copy(this.titleLabel)
       .addScaledVector(cameraUp, this.titleText.size.height * textScale * 0.5 + 0.05);
     this.metaText.mesh.position.copy(this.metaLabel)
-      .addScaledVector(cameraRight, -this.metaText.size.width * textScale)
       .addScaledVector(cameraUp, this.metaText.size.height * textScale * 0.5 + 0.05);
-    this.tempText.mesh.position.copy(this.tempLabel)
-      .addScaledVector(cameraUp, this.tempText.size.height * textScale * 0.5 + 0.02);
-
-    const showBackplates = forceShow || showAnchors;
-    const titlePlateWidth = Math.max(this.titleText.size.width * textScale, 0.18);
-    const titlePlateHeight = Math.max(this.titleText.size.height * textScale, 0.08);
-    const metaPlateWidth = Math.max(this.metaText.size.width * textScale, 0.18);
-    const metaPlateHeight = Math.max(this.metaText.size.height * textScale, 0.08);
-    const tempPlateWidth = Math.max(this.tempText.size.width * textScale, 0.16);
-    const tempPlateHeight = Math.max(this.tempText.size.height * textScale, 0.08);
-
-    this.debugBackplates.title.position.copy(this.titleText.mesh.position)
-      .addScaledVector(cameraRight, titlePlateWidth * 0.5)
-      .addScaledVector(cameraUp, -titlePlateHeight * 0.5);
-    this.debugBackplates.title.quaternion.copy(cameraQuaternion);
-    this.debugBackplates.title.scale.set(titlePlateWidth, titlePlateHeight, 1);
-
-    this.debugBackplates.meta.position.copy(this.metaText.mesh.position)
-      .addScaledVector(cameraRight, metaPlateWidth * 0.5)
-      .addScaledVector(cameraUp, -metaPlateHeight * 0.5);
-    this.debugBackplates.meta.quaternion.copy(cameraQuaternion);
-    this.debugBackplates.meta.scale.set(metaPlateWidth, metaPlateHeight, 1);
-
-    this.debugBackplates.temp.position.copy(this.tempText.mesh.position)
-      .addScaledVector(cameraRight, tempPlateWidth * 0.5)
-      .addScaledVector(cameraUp, -tempPlateHeight * 0.5);
-    this.debugBackplates.temp.quaternion.copy(cameraQuaternion);
-    this.debugBackplates.temp.scale.set(tempPlateWidth, tempPlateHeight, 1);
-    Object.values(this.debugBackplates).forEach((backplate) => {
-      backplate.visible = showBackplates;
-    });
+    this.tempText.mesh.position.copy(this.tempLabel);
 
     this.setOpacity(
-      Math.max(this.titleTextProgress * presenceMix, titleWindow ? debugFloor : 0),
-      Math.max(this.metaTextProgress * presenceMix, metaWindow ? debugFloor : 0),
-      Math.max(this.tempTextProgress * presenceMix, tempWindow ? debugFloor : 0)
+      this.titleTextProgress * visibility,
+      this.metaTextProgress * visibility,
+      this.tempTextProgress * visibility
     );
-
-    if ((forceShow || showAnchors) && camera && this.index === 0 && time - this.lastDebugLogAt >= 1) {
-      this.lastDebugLogAt = time;
-      this.titleClip.copy(this.titleText.mesh.position).project(camera);
-      this.metaClip.copy(this.metaText.mesh.position).project(camera);
-      this.tempClip.copy(this.tempText.mesh.position).project(camera);
-      console.info('[CubeSceneLabels]', {
-        index: this.index,
-        project: this.project?.hash ?? this.project?.title ?? 'unknown',
-        scrollDistance: Number(scrollDistance.toFixed(3)),
-        presence: Number(presenceMix.toFixed(3)),
-        titleWindow,
-        metaWindow,
-        tempWindow,
-        titleOpacity: Number(clamp01(Math.max(this.titleTextProgress * presenceMix, titleWindow ? debugFloor : 0)).toFixed(3)),
-        metaOpacity: Number(clamp01(Math.max(this.metaTextProgress * presenceMix, metaWindow ? debugFloor : 0)).toFixed(3)),
-        tempOpacity: Number(clamp01(Math.max(this.tempTextProgress * presenceMix, tempWindow ? debugFloor : 0)).toFixed(3)),
-        titleVisible: this.titleText.mesh.visible,
-        metaVisible: this.metaText.mesh.visible,
-        tempVisible: this.tempText.mesh.visible,
-        titleClip: {
-          x: Number(this.titleClip.x.toFixed(3)),
-          y: Number(this.titleClip.y.toFixed(3)),
-          z: Number(this.titleClip.z.toFixed(3))
-        },
-        metaClip: {
-          x: Number(this.metaClip.x.toFixed(3)),
-          y: Number(this.metaClip.y.toFixed(3)),
-          z: Number(this.metaClip.z.toFixed(3))
-        },
-        tempClip: {
-          x: Number(this.tempClip.x.toFixed(3)),
-          y: Number(this.tempClip.y.toFixed(3)),
-          z: Number(this.tempClip.z.toFixed(3))
-        }
-      });
-    }
   }
 
   setOpacity(titleOpacity, metaOpacity, tempOpacity) {
@@ -486,15 +346,10 @@ export class CubeSceneLabels {
 
   setVisible(visible) {
     this.visible = Boolean(visible);
+
     if (!this.visible) {
       this.titleLine.visible = false;
       this.metaLine.visible = false;
-      Object.values(this.debugBackplates).forEach((backplate) => {
-        backplate.visible = false;
-      });
-      Object.values(this.debugPoints).forEach((point) => {
-        point.visible = false;
-      });
       this.setOpacity(0, 0, 0);
     }
   }
@@ -505,9 +360,7 @@ export class CubeSceneLabels {
       this.metaText.mesh,
       this.tempText.mesh,
       this.titleLine,
-      this.metaLine,
-      ...Object.values(this.debugBackplates),
-      ...Object.values(this.debugPoints)
+      this.metaLine
     ].forEach((object) => {
       this.parent.remove(object);
     });
@@ -519,13 +372,5 @@ export class CubeSceneLabels {
     this.titleLine.material.dispose();
     this.metaLine.geometry.dispose();
     this.metaLine.material.dispose();
-    Object.values(this.debugBackplates).forEach((backplate) => {
-      backplate.geometry.dispose();
-      backplate.material.dispose();
-    });
-    Object.values(this.debugPoints).forEach((point) => {
-      point.geometry.dispose();
-      point.material.dispose();
-    });
   }
 }

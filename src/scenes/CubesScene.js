@@ -56,6 +56,7 @@ const CUBES_BG_FRAGMENT_SHADER = /* glsl */ `
   uniform float uTime;
   uniform float uProgress;
   uniform float uAspect;
+  uniform vec2 uResolution;
   uniform vec3 uColor1;
   uniform vec3 uColor2;
   uniform sampler2D tPerlin;
@@ -71,38 +72,37 @@ const CUBES_BG_FRAGMENT_SHADER = /* glsl */ `
   }
 
   vec4 getBlueNoise(vec2 fragCoord) {
-    return texture2D(tBlue, fract(fragCoord / 128.0 + uBlueOffset));
+    float invSize = 1.0 / 128.0;
+    return texture2D(tBlue, fragCoord * invSize + uBlueOffset);
   }
 
   void main() {
-    vec2 screenUv = vUv - 0.5;
-    screenUv.x *= uAspect;
+    vec2 screenUv = vUv;
+    screenUv.x *= max(uAspect, 0.0001);
+    screenUv *= 0.3;
 
-    float t = uTime * 0.04;
-    float mistA = texture2D(tPerlin, screenUv * 0.22 + vec2(-t, t * 0.28)).r;
-    float mistB = texture2D(tPerlin, screenUv * 0.12 + vec2(t * 0.32, -t * 0.16)).r;
-    float mist = mistA * 0.62 + mistB * 0.38;
+    float t = uTime * 0.075;
+    vec2 offset1 = vec2(-t, t * 0.25);
+    vec2 offset2 = vec2(t, -t * 0.5);
+    offset1.y -= uProgress * 0.25;
+    offset1.y -= uProgress * 0.4;
 
-    float horizon = smoothstep(-0.55, 0.9, vUv.y);
-    float vignette = 1.0 - smoothstep(0.18, 0.92, length((vUv - 0.5) * vec2(1.0, 0.78)) * 1.15);
-    float gradient = clamp(0.32 + mist * 0.3 + horizon * 0.16 + vignette * 0.08, 0.0, 1.0);
-    vec3 color = mix(uColor2, uColor1, gradient);
+    float perlin = texture2D(tPerlin, screenUv + offset1).r;
+    perlin += texture2D(tPerlin, screenUv * 0.5 + offset2).r;
+    perlin *= 0.5;
 
-    vec2 starUv = vec2((vUv.x - 0.5) * uAspect + 0.5, vUv.y);
-    starUv *= vec2(54.0, 42.0);
-    starUv += vec2(0.0, -uProgress * 4.0);
-    vec2 starCell = floor(starUv);
-    vec2 starLocal = fract(starUv) - 0.5;
-    float starSeed = hash12(starCell + 17.31);
-    float starMask = step(0.986, starSeed);
-    float starSize = mix(0.035, 0.11, hash12(starCell + 2.41));
-    float star = smoothstep(starSize, 0.0, length(starLocal));
-    float twinkle = 0.75 + 0.25 * sin(uTime * 2.0 + hash12(starCell + 9.71) * 6.28318);
-    color += vec3(star * starMask * twinkle * uDotStrength);
+    vec3 color = mix(uColor1, uColor2, perlin);
 
-    vec3 blueNoise = getBlueNoise(gl_FragCoord.xy).rgb - 0.5;
-    color += blueNoise * 0.015;
-    gl_FragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
+    vec2 dotUv = screenUv * 45.0;
+    dotUv += vec2(0.0, -uProgress * 10.0);
+    float dots = texture2D(tDotPattern, dotUv).r;
+    float dotId = hash12(floor(dotUv));
+    float dotFade = 1.0 - abs(fract(dotId + uTime * 0.1) - 0.5) * 2.0;
+    color += dots * dotFade * uDotStrength;
+
+    vec3 blueNoise = getBlueNoise(gl_FragCoord.xy).rgb;
+    color += blueNoise * 0.05;
+    gl_FragColor = vec4(color, 1.0);
   }
 `;
 
@@ -532,21 +532,18 @@ const TEXT_CYLINDER_FRAGMENT_SHADER = /* glsl */ `
 `;
 
 const DEFAULT_CUBES_LOOK_SETTINGS = Object.freeze({
-  lutIntensity: 0.28,
+  lutIntensity: 0.08,
   bloomStrength: 0,
   bloomRadius: 0.62,
   bloomThreshold: 0.72,
-  bgDotStrength: 0.16,
-  backgroundShapeAlphaScale: 0.08,
-  blurryTextOpacityScale: 0.16,
-  smokeOpacityScale: 0.72
+  bgDotStrength: 0,
+  backgroundShapeAlphaScale: 0,
+  blurryTextOpacityScale: 0,
+  smokeOpacityScale: 0.45
 });
 
 const DEFAULT_CUBES_LABEL_DEBUG_SETTINGS = Object.freeze({
-  forceShow: false,
-  showAnchors: false,
-  textScaleMultiplier: 1,
-  opacityFloor: 0
+  textScaleMultiplier: 0.5
 });
 
 function clamp01(value) {
@@ -626,9 +623,52 @@ function createSmokeMaterial(noiseTexture) {
     fragmentShader: SMOKE_FRAGMENT_SHADER,
     transparent: true,
     depthTest: false,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending
+    depthWrite: false
   });
+}
+
+function createFullscreenTriangleGeometry() {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute(
+    'position',
+    new THREE.Float32BufferAttribute(
+      [
+        -1, -1, 0,
+        3, -1, 0,
+        -1, 3, 0
+      ],
+      3
+    )
+  );
+  geometry.setAttribute(
+    'uv',
+    new THREE.Float32BufferAttribute(
+      [
+        0, 0,
+        2, 0,
+        0, 2
+      ],
+      2
+    )
+  );
+  return geometry;
+}
+
+function configureRepeatingTexture(texture, {
+  minFilter = THREE.LinearFilter,
+  magFilter = THREE.LinearFilter
+} = {}) {
+  if (!texture) {
+    return texture;
+  }
+
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.minFilter = minFilter;
+  texture.magFilter = magFilter;
+  texture.generateMipmaps = false;
+  texture.needsUpdate = true;
+  return texture;
 }
 
 function createRoomRingMaterial() {
@@ -707,7 +747,7 @@ export class CubesScene extends SceneBase {
   constructor({ assets, projects, clickLabel = 'Click to explore' }) {
     super({
       name: 'cubes',
-      background: '#d7dde8'
+      background: '#c9d0df'
     });
 
     // -------- 运行时状态 --------
@@ -733,7 +773,7 @@ export class CubesScene extends SceneBase {
     this.hoveredProjectHash = null;
     this.hoveredProjectIndex = -1;
     this.pointerProjectIndex = -1;
-    this.backgroundShapesEnabled = true;
+    this.backgroundShapesEnabled = false;
     this.backgroundShapesVisible = false;
     this.blurryTextVisible = false;
     this.backgroundShapes = null;
@@ -763,7 +803,19 @@ export class CubesScene extends SceneBase {
     this.labelsGroup = new THREE.Group();
     this.verticalOffset = 5.75;
     this.environment = assets.get('texture', 'cubes-environment');
-    this.blueNoise = assets.get('texture', 'blue-noise');
+    this.blueNoise = configureRepeatingTexture(
+      assets.get('texture', 'blue-noise'),
+      {
+        minFilter: THREE.NearestFilter,
+        magFilter: THREE.NearestFilter
+      }
+    );
+    this.perlinData = configureRepeatingTexture(
+      assets.get('texture', 'perlin-data') ?? assets.get('texture', 'detail-perlin')
+    );
+    this.dotPattern = configureRepeatingTexture(
+      assets.get('texture', 'dot-pattern')
+    );
     this.windNoise = assets.get('texture', 'wind-noise') ?? this.blueNoise;
     this.trianglesTexture = assets.get('texture', 'triangles-tiling') ?? null;
     this.baseCameraPosition = new THREE.Vector3(0, 0, 5);
@@ -808,16 +860,17 @@ export class CubesScene extends SceneBase {
 
     // -------- 屏幕空间背景层与辅助层 --------
     this.roomBackground = new THREE.Mesh(
-      new THREE.PlaneGeometry(2, 2),
+      createFullscreenTriangleGeometry(),
       new THREE.ShaderMaterial({
         uniforms: {
           uTime: { value: 0 },
           uProgress: { value: 0 },
           uAspect: { value: 1 },
-          uColor1: { value: new THREE.Color('#cfd7e2') },
-          uColor2: { value: new THREE.Color('#8f98a8') },
-          tPerlin: { value: assets.get('texture', 'detail-perlin') ?? null },
-          tDotPattern: { value: assets.get('texture', 'dot-pattern') ?? null },
+          uResolution: { value: new THREE.Vector2(1, 1) },
+          uColor1: { value: new THREE.Color('#c9d0df') },
+          uColor2: { value: new THREE.Color('#545b6b') },
+          tPerlin: { value: this.perlinData ?? null },
+          tDotPattern: { value: this.dotPattern ?? null },
           tBlue: { value: this.blueNoise },
           uBlueOffset: { value: this.blueOffset.clone() },
           uDotStrength: { value: this.lookDebugSettings.bgDotStrength }
@@ -829,8 +882,11 @@ export class CubesScene extends SceneBase {
         toneMapped: false
       })
     );
+    this.roomBackground.name = 'bg';
     this.roomBackground.frustumCulled = false;
     this.roomBackground.renderOrder = -99;
+    this.roomBackground.updateMatrixWorld(true);
+    this.roomBackground.matrixAutoUpdate = false;
     this.add(this.roomBackground);
 
     const backgroundShapesGeometry = ensureScreenSpaceAttributes(
@@ -999,14 +1055,14 @@ export class CubesScene extends SceneBase {
         envMap: this.environment ?? null
       });
 
-      material.emissive.set(project.accent);
-      material.emissiveIntensity = 0.025;
+      material.emissive.set('#ffffff');
+      material.emissiveIntensity = 0;
       material.opacity = 1;
 
       const cubeMesh = new THREE.Mesh(geometry, material);
       cubeMesh.geometry.computeBoundingBox?.();
-      cubeMesh.rotation.x = 0.45;
-      cubeMesh.rotation.y = 0.6;
+      cubeMesh.rotation.x = 0;
+      cubeMesh.rotation.y = 0;
       cubeMesh.name = project.cubeKey ?? `cube-${index}`;
       cubeMesh.userData.project = project;
       cubeMesh.renderOrder = 3;
@@ -1180,6 +1236,23 @@ export class CubesScene extends SceneBase {
     return closestProgress;
   }
 
+  getAutoCenterOffset() {
+    let closestDistance = Infinity;
+    let closestDelta = 0;
+
+    this.cubeBaseStates.forEach((state) => {
+      const delta = state.centeredProgress - this.progress;
+      const distance = Math.abs(delta);
+
+      if (distance < closestDistance) {
+        closestDistance = distance;
+        closestDelta = delta;
+      }
+    });
+
+    return closestDelta * (this.projects.length + 1);
+  }
+
   ensureTransmissionTarget(width = 1, height = 1) {
     // transmission capture 依赖单独离屏目标，尺寸变化时才重建。
     const nextWidth = Math.max(1, Math.round(width));
@@ -1283,12 +1356,6 @@ export class CubesScene extends SceneBase {
     this.updateTransmissionUniforms(this.transmissionTarget.width, this.transmissionTarget.height);
   }
 
-  setDetailFocus(projectHash = null, progress = 0) {
-    // detail 打开时，CubesScene 不会立刻消失，而是先把被选中的项目做聚焦 / 退场。
-    this.detailFocusHash = projectHash;
-    this.detailFocusProgress = THREE.MathUtils.clamp(progress, 0, 1);
-    this.detailFocusIndex = this.projects.findIndex((project) => project.hash === projectHash);
-  }
 
   setDetailFocus(projectHash = null, progress = 0) {
     this.detailFocusHash = projectHash;
@@ -1569,30 +1636,25 @@ export class CubesScene extends SceneBase {
   getSectionHandoffState() {
     // CubesScene 既要承接 Igloo -> Cubes 的进入，
     // 也要处理 Cubes -> Entry 的离场，所以单独拆了 handoff 状态。
-    const isIncomingFromIgloo = this.transitionState?.role === 'next' && this.transitionState?.previousKey === 'igloo';
-    const isOutgoingToEntry = this.transitionState?.role === 'current' && this.transitionState?.nextKey === 'entry';
-    const enterProgress = isIncomingFromIgloo
-      ? THREE.MathUtils.smoothstep(this.transitionState.enterProgress ?? 0, 0, 1)
-      : 1;
-    const exitProgress = isOutgoingToEntry
-      ? THREE.MathUtils.smoothstep(this.transitionState.exitProgress ?? 0, 0, 1)
-      : 0;
-
     return {
-      isIncomingFromIgloo,
-      isOutgoingToEntry,
-      enterProgress,
-      exitProgress
+      isIncomingFromIgloo: false,
+      isOutgoingToEntry: false,
+      enterProgress: 1,
+      exitProgress: 0
     };
   }
 
   update(delta) {
-    // -------- 全局 section 级状态 --------
     this.time += delta;
+
     const safeDelta = Math.max(delta, 1 / 240);
     const rawScrollVelocity = Math.abs((this.progress - this.lastProgress) / safeDelta);
     this.lastProgress = this.progress;
-    this.scrollVelocity = THREE.MathUtils.lerp(this.scrollVelocity, rawScrollVelocity, 1 - Math.exp(-safeDelta * 8));
+    this.scrollVelocity = THREE.MathUtils.lerp(
+      this.scrollVelocity,
+      rawScrollVelocity,
+      1 - Math.exp(-safeDelta * 8)
+    );
     this.pointerCurrent.lerp(this.pointerTarget, 1 - Math.exp(-safeDelta * 7));
     this.pointerStrength = THREE.MathUtils.lerp(
       this.pointerStrength,
@@ -1602,38 +1664,70 @@ export class CubesScene extends SceneBase {
 
     const stackSpan = this.verticalOffset * (this.cubeGroups.length + 1);
     const scrollOffset = this.progress * stackSpan;
+    const cameraTrackY = -scrollOffset;
+    const focusProgress = this.detailFocusProgress;
     const focusOffset = this.detailFocusIndex >= 0
       ? (
         (this.cubeBaseStates[this.detailFocusIndex]?.centeredProgress ?? this.progress) - this.progress
-      ) * stackSpan * this.detailFocusProgress
+      ) * stackSpan * focusProgress
       : 0;
-    const hoverEnabled = this.detailFocusIndex < 0;
-    const hoverPresence = hoverEnabled && this.hoveredProjectIndex >= 0 ? 1 : 0;
-    const { enterProgress, exitProgress } = this.getSectionHandoffState();
-    const centeredIndex = this.getCenteredProjectIndex();
-    const entryLift = 1 - enterProgress;
-    const cameraTrackY = -scrollOffset;
     const motionBlurAmount = THREE.MathUtils.clamp(this.scrollVelocity * 0.1, 0, 1);
-    const pointerInfluence = this.pointerStrength
-      * enterProgress
-      * (1 - exitProgress * 0.82)
-      * (1 - this.detailFocusProgress * 0.92);
+    const pointerInfluence = this.pointerStrength * (1 - focusProgress);
+    const centeredIndex = this.getCenteredProjectIndex();
 
-    this.projectGroup.position.x = this.pointerCurrent.x * 0.18 * pointerInfluence;
+    this.projectGroup.position.x = this.pointerCurrent.x * 0.08 * pointerInfluence;
     this.projectGroup.position.y = focusOffset;
-    this.projectGroup.position.z = this.pointerCurrent.y * -0.12 * pointerInfluence;
-    this.root.rotation.x = this.pointerCurrent.y * 0.05 * pointerInfluence;
-    this.root.rotation.y = this.pointerCurrent.x * 0.075 * pointerInfluence;
+    this.projectGroup.position.z = 0;
+    this.root.rotation.x = this.pointerCurrent.y * 0.02 * pointerInfluence;
+    this.root.rotation.y = this.pointerCurrent.x * 0.025 * pointerInfluence;
 
-    // -------- 背景层动画 --------
     if (this.roomBackground) {
       this.roomBackground.material.uniforms.uTime.value = this.time;
       this.roomBackground.material.uniforms.uProgress.value = this.progress;
       this.roomBackground.material.uniforms.uAspect.value = this.camera.aspect;
+      this.roomBackground.material.uniforms.uResolution.value.set(
+        Math.max(this.width ?? 1, 1),
+        Math.max(this.height ?? 1, 1)
+      );
       this.roomBackground.material.uniforms.uBlueOffset.value.copy(this.blueOffset);
+      this.roomBackground.material.uniforms.uDotStrength.value = this.lookDebugSettings.bgDotStrength;
     }
 
-    // -------- 每个项目 cube 的排布、聚焦、hover 与离场动画 --------
+    const backgroundPresence = THREE.MathUtils.lerp(1, 0.22, focusProgress);
+    this.backgroundShapesVisible = this.lookDebugSettings.backgroundShapeAlphaScale > 0.0001 && backgroundPresence > 0.01;
+    this.blurryTextVisible = this.lookDebugSettings.blurryTextOpacityScale > 0.0001 && backgroundPresence > 0.01;
+
+    if (this.backgroundShapes) {
+      this.backgroundShapes.visible = this.backgroundShapesEnabled && this.backgroundShapesVisible;
+      this.backgroundShapes.material.uniforms.uTime.value = this.time;
+      this.backgroundShapes.material.uniforms.uProgress.value = this.progress;
+      this.backgroundShapes.material.uniforms.uAspect.value = this.camera.aspect;
+      this.backgroundShapes.material.uniforms.uAlpha.value = this.lookDebugSettings.backgroundShapeAlphaScale * backgroundPresence;
+    }
+
+    if (this.blurryText) {
+      this.blurryText.visible = this.blurryTextVisible;
+      this.blurryText.material.uniforms.uTime.value = this.time;
+      this.blurryText.material.uniforms.uProgress.value = this.progress;
+      this.blurryText.material.uniforms.uAspect.value = this.camera.aspect;
+      this.blurryText.material.uniforms.uOpacity.value = this.lookDebugSettings.blurryTextOpacityScale * backgroundPresence;
+    }
+
+    if (this.roomRing) {
+      this.roomRing.visible = false;
+      this.roomRing.material.uniforms.uAlpha.value = 0;
+    }
+
+    if (this.forcefield) {
+      this.forcefield.visible = false;
+      this.forcefield.material.uniforms.uAlpha.value = 0;
+    }
+
+    this.textCylinders.forEach((mesh) => {
+      mesh.visible = false;
+      mesh.material.uniforms.uAlpha.value = 0;
+    });
+
     this.cubeGroups.forEach((cubeGroup, index) => {
       const cube = this.cubes[index];
       const innerObject = this.innerObjects[index];
@@ -1642,23 +1736,6 @@ export class CubesScene extends SceneBase {
       const material = cube.material;
       const baseState = this.cubeBaseStates[index];
       const isFocused = this.detailFocusIndex === index;
-      const isHovered = hoverEnabled && this.hoveredProjectIndex === index;
-      const focusProgress = this.detailFocusProgress;
-      const hoverProgress = isHovered ? 1 : 0;
-      const runtimeScrollDistance = baseState.position.y + focusOffset - cameraTrackY;
-      const frostEnergy = Math.abs(runtimeScrollDistance) < 2 && this.detailFocusProgress < 0.02
-        ? (this.frostMaps[index]?.soundVelocity ?? 0)
-        : 0;
-      const centerPresence = 1 - smoothWindow(Math.abs(baseState.centeredProgress - this.progress), 0.1, 0.45);
-      const detailHandoffProgress = isFocused
-        ? THREE.MathUtils.smoothstep(focusProgress, 0.34, 0.98)
-        : 0;
-      const entryStagger = getStaggerProgress(enterProgress, index);
-      const exitStagger = getStaggerProgress(exitProgress, index, 0.11, 0.34);
-      const spreadDirection = this.detailFocusIndex >= 0 ? Math.sign(index - this.detailFocusIndex) : 0;
-      const restingX = Math.sin(this.progress * Math.PI + index) * 0.32;
-      const focusedX = isFocused ? 0 : spreadDirection * 1.15;
-      const settledX = THREE.MathUtils.lerp(restingX, focusedX, focusProgress);
       const runtimeRand = baseState.runtimeRand ?? 0.5;
       const firstRuntimeRand = this.cubeBaseStates[0]?.runtimeRand ?? 0.5;
       const rotationSign = (((index + firstRuntimeRand) * 242.45353) % 1) < 0.5 ? -1 : 1;
@@ -1666,199 +1743,70 @@ export class CubesScene extends SceneBase {
       const rotationScaleY = THREE.MathUtils.lerp(0.1, 0.3, (runtimeRand * 123.5343) % 1);
       const rotationScaleZ = THREE.MathUtils.lerp(0.1, 0.25, (runtimeRand * 54.654) % 1);
       const scrollProgressDifference = baseState.centeredProgress - this.progress;
-      const additionalRotationAmount = 1 - this.detailFocusProgress;
-      const idleRotationAmplitude = 0.1 * additionalRotationAmount;
+      const runtimeScrollDistance = baseState.position.y + focusOffset - cameraTrackY;
+      const frostEnergy = Math.abs(runtimeScrollDistance) < 2 && focusProgress < 0.02
+        ? (this.frostMaps[index]?.soundVelocity ?? 0)
+        : 0;
+      const idleRotationAmplitude = 0.1 * (1 - focusProgress);
       const idleRotationDirection = Math.sign(runtimeRand - 0.5) || 1;
-      const originalRotationX = (-14 * rotationSign * (1 - rotationScaleY)) * scrollProgressDifference
+      const rotationX = (-14 * rotationSign * (1 - rotationScaleY)) * scrollProgressDifference
         + Math.sin(this.time * 0.3 + runtimeRand * 42.987) * idleRotationAmplitude * idleRotationDirection;
-      const originalRotationY = (11 * rotationSign * (1 - rotationScaleX)) * scrollProgressDifference
+      const rotationY = (11 * rotationSign * (1 - rotationScaleX)) * scrollProgressDifference
         + Math.sin(this.time * 0.3 + runtimeRand * 12.423) * idleRotationAmplitude * idleRotationDirection;
-      const originalRotationZ = (6 * rotationSign * (1 - rotationScaleZ)) * scrollProgressDifference
+      const rotationZ = (6 * rotationSign * (1 - rotationScaleZ)) * scrollProgressDifference
         + Math.sin(this.time * 0.3 + runtimeRand * 2.53) * idleRotationAmplitude * idleRotationDirection;
-      const baseScale = THREE.MathUtils.lerp(index === 0 ? 1.08 : 1, isFocused ? 1.4 : 0.72, focusProgress);
-      const detailOpacity = THREE.MathUtils.lerp(
-        THREE.MathUtils.lerp(THREE.MathUtils.lerp(1, isFocused ? 1 : 0.18, focusProgress), 1, hoverProgress * 0.35),
-        isFocused ? 0.06 : 0.18,
-        detailHandoffProgress
-      );
-      const detailZ = THREE.MathUtils.lerp(0, isFocused ? 0.8 : -0.9, focusProgress)
-        + hoverProgress * 0.12
-        + detailHandoffProgress * 0.38;
-      const enteredX = THREE.MathUtils.lerp(settledX + 1.2 - index * 0.1, settledX, entryStagger);
-      const enteredY = baseState.position.y + THREE.MathUtils.lerp(1.45 + index * 0.22, 0, entryStagger);
-      const enteredZ = THREE.MathUtils.lerp(-1.55 - index * 0.18, detailZ, entryStagger);
-      const targetExitX = (index - 1) * 0.22;
-      const targetExitY = -1.15 - index * 1.55;
-      const targetExitZ = -2.8 - index * 0.6;
-      const finalScale = baseScale
-        * THREE.MathUtils.lerp(0.78, 1, entryStagger)
-        * THREE.MathUtils.lerp(1, 1.002, hoverProgress)
-        * THREE.MathUtils.lerp(1, 1.06, frostEnergy)
-        * THREE.MathUtils.lerp(1, 0.88, detailHandoffProgress)
-        * THREE.MathUtils.lerp(1, 0.52, exitStagger);
-      const enteredOpacity = THREE.MathUtils.lerp(0.02, detailOpacity, entryStagger);
-      const enteredEmissive = Math.max(
-        THREE.MathUtils.lerp(0.01, THREE.MathUtils.lerp(0.02, isFocused ? 0.1 : 0.14, focusProgress) + detailHandoffProgress * 0.04, entryStagger),
-        THREE.MathUtils.lerp(0.02, 0.16, hoverProgress)
-      );
-      const exitGlow = smoothWindow(exitStagger, 0.08, 0.34) * (1 - smoothWindow(exitStagger, 0.4, 0.82));
-      cube.rotation.x = originalRotationX * THREE.MathUtils.lerp(0.6, 1, entryStagger) * THREE.MathUtils.lerp(1, 0.28, exitStagger);
-      cube.rotation.y = originalRotationY * THREE.MathUtils.lerp(0.6, 1, entryStagger) * THREE.MathUtils.lerp(1, 0.28, exitStagger);
-      cube.rotation.z = THREE.MathUtils.lerp(
-        originalRotationZ,
-        originalRotationZ + spreadDirection * 0.06,
-        focusProgress * (1 - detailHandoffProgress)
-      ) * THREE.MathUtils.lerp(0.6, 1, entryStagger) * THREE.MathUtils.lerp(1, 0.24, exitStagger);
+      const focusSpread = this.detailFocusIndex >= 0 ? Math.sign(index - this.detailFocusIndex) : 0;
+      const focusFade = focusProgress > 0
+        ? THREE.MathUtils.lerp(1, isFocused ? 1 : 0.16, focusProgress)
+        : 1;
 
-      innerObject.rotation.x = baseState.innerRotation.x + Math.sin(this.time * 0.8 + index) * 0.08 * (1 - detailHandoffProgress);
-      innerObject.rotation.y += delta * (0.18 + index * 0.025) * THREE.MathUtils.lerp(0.75, 1.2, hoverProgress);
+      cubeGroup.position.x = this.detailFocusIndex >= 0
+        ? THREE.MathUtils.lerp(0, focusSpread * 0.26, focusProgress)
+        : 0;
+      cubeGroup.position.y = baseState.position.y + THREE.MathUtils.lerp(0, isFocused ? 0 : -0.2 - index * 0.08, focusProgress);
+      cubeGroup.position.z = THREE.MathUtils.lerp(0, isFocused ? 0 : -0.55, focusProgress);
+      cubeGroup.scale.setScalar(THREE.MathUtils.lerp(1, isFocused ? 1 : 0.82, focusProgress));
+
+      cube.rotation.x = rotationX;
+      cube.rotation.y = rotationY;
+      cube.rotation.z = rotationZ;
+
+      material.opacity = focusFade;
+      material.emissiveIntensity = frostEnergy * 0.08;
+
+      innerObject.rotation.x = baseState.innerRotation.x + Math.sin(this.time * 0.8 + index) * 0.08 * (1 - focusProgress);
+      innerObject.rotation.y += delta * (0.18 + index * 0.025);
       innerObject.rotation.z = baseState.innerRotation.z + Math.sin(this.time * 0.6 + index * 1.7) * 0.06;
-      innerObject.position.y = Math.sin(this.time * 1.1 + index) * 0.04 * (1 - detailHandoffProgress);
-      innerObject.scale.copy(baseState.innerScale).multiplyScalar(
-        THREE.MathUtils.lerp(0.94, 1.015, hoverProgress) * THREE.MathUtils.lerp(1, 0.86, detailHandoffProgress)
-      );
-      innerObject.material.opacity = THREE.MathUtils.lerp(0.72, 1, hoverProgress) * THREE.MathUtils.lerp(1, 0.35, detailHandoffProgress);
-
-      cubeGroup.position.x = THREE.MathUtils.lerp(enteredX, targetExitX, exitStagger);
-      cubeGroup.position.y = THREE.MathUtils.lerp(enteredY, targetExitY, exitStagger);
-      cubeGroup.position.z = THREE.MathUtils.lerp(enteredZ, targetExitZ, exitStagger);
-      cubeGroup.scale.setScalar(finalScale);
-
-      material.opacity = THREE.MathUtils.lerp(enteredOpacity * THREE.MathUtils.lerp(0.12, 1, centerPresence), 0.02, exitStagger);
-      material.emissiveIntensity = (THREE.MathUtils.lerp(enteredEmissive, 0.05, exitStagger) + exitGlow * 0.12)
-        * THREE.MathUtils.lerp(0.35, 1, centerPresence)
-        + frostEnergy * THREE.MathUtils.lerp(0.04, 0.2, hoverProgress * 0.65 + centerPresence * 0.35);
+      innerObject.position.y = Math.sin(this.time * 1.1 + index) * 0.04 * (1 - focusProgress);
+      innerObject.scale.copy(baseState.innerScale);
+      innerObject.material.opacity = focusFade;
 
       smokeMaterial.uniforms.uTime.value = this.time;
-      smokeMaterial.uniforms.uProgress.value = baseState.centeredProgress - this.progress;
-      const plexusVisibility = (Math.abs(runtimeScrollDistance) < 1.25 ? 1 : 0)
-        * enterProgress
-        * (1 - exitProgress * 0.94)
-        * (1 - detailHandoffProgress * 0.72);
+      smokeMaterial.uniforms.uProgress.value = scrollProgressDifference;
+
       plexus?.update({
         delta: safeDelta,
         time: this.time,
-        visibility: plexusVisibility,
-        hover: hoverProgress,
+        visibility: Math.abs(runtimeScrollDistance) < 1.25 ? focusFade : 0,
+        hover: 0,
         focus: isFocused ? focusProgress : 0,
         scrollSpeed: motionBlurAmount
       });
     });
 
-    // -------- 背景 shapes / blurry text 辅助层 --------
-    const shardSourceIndex = this.detailFocusIndex >= 0 ? this.detailFocusIndex : centeredIndex;
-    const shardSourceState = shardSourceIndex >= 0 ? this.cubeBaseStates[shardSourceIndex] : null;
-    const shardCenterPresence = shardSourceState
-      ? 1 - smoothWindow(Math.abs(shardSourceState.centeredProgress - this.progress), 0.06, 0.38)
+    const shardTarget = centeredIndex >= 0
+      ? (this.frostMaps[centeredIndex]?.soundVelocity ?? 0) * 0.5
       : 0;
-    const shardFrostEnergy = shardSourceIndex >= 0
-      ? (this.frostMaps[shardSourceIndex]?.soundVelocity ?? 0)
-      : 0;
-    const shardTarget = THREE.MathUtils.clamp(
-      shardFrostEnergy
-        * shardCenterPresence
-        * enterProgress
-        * (1 - exitProgress * 0.92)
-        * (1 - this.detailFocusProgress * 0.58),
-      0,
-      1
-    );
     this.shardMix = THREE.MathUtils.lerp(this.shardMix, shardTarget, 1 - Math.exp(-safeDelta * 5));
 
-    const backgroundPresence = enterProgress
-      * (1 - exitProgress * 0.92)
-      * (1 - this.detailFocusProgress * 0.82);
-
-    this.backgroundShapesVisible = backgroundPresence > 0.01;
-    this.blurryTextVisible = backgroundPresence > 0.01;
-
-    if (this.backgroundShapes) {
-      this.backgroundShapes.visible = this.backgroundShapesEnabled && this.backgroundShapesVisible;
-      this.backgroundShapes.material.uniforms.uTime.value = this.time;
-      this.backgroundShapes.material.uniforms.uProgress.value = this.progress;
-      this.backgroundShapes.material.uniforms.uAspect.value = this.camera.aspect;
-      this.backgroundShapes.material.uniforms.uAlpha.value = THREE.MathUtils.lerp(0.08, 0.14, enterProgress)
-        * this.lookDebugSettings.backgroundShapeAlphaScale
-        * (1 - exitProgress * 0.88)
-        * (1 - this.detailFocusProgress * 0.82);
-    }
-
-    if (this.blurryText) {
-      this.blurryText.visible = this.blurryTextVisible;
-      this.blurryText.material.uniforms.uTime.value = this.time;
-      this.blurryText.material.uniforms.uProgress.value = this.progress;
-      this.blurryText.material.uniforms.uAspect.value = this.camera.aspect;
-      this.blurryText.material.uniforms.uOpacity.value = THREE.MathUtils.lerp(0.08, 0.18, enterProgress)
-        * this.lookDebugSettings.blurryTextOpacityScale
-        * (1 - exitProgress * 0.92)
-        * (1 - this.detailFocusProgress * 0.78);
-    }
-
-    // -------- 相机与 billboarding 烟雾 --------
-    const spatialLayerPresence = backgroundPresence * THREE.MathUtils.lerp(1, 0.42, motionBlurAmount);
-
-    const spatialInteractionPresence = Math.max(hoverPresence * 0.82, this.detailFocusProgress);
-
-    if (this.roomRing) {
-      this.roomRing.visible = spatialLayerPresence > 0.01 && spatialInteractionPresence > 0.02;
-      this.roomRing.position.set(
-        this.pointerCurrent.x * 0.12 * pointerInfluence,
-        cameraTrackY - 0.95 + this.pointerCurrent.y * 0.06 * pointerInfluence,
-        -0.2
-      );
-      this.roomRing.scale.setScalar(THREE.MathUtils.lerp(1.06, 1.18, hoverPresence * 0.45 + this.detailFocusProgress * 0.55));
-      this.roomRing.material.uniforms.uTime.value = this.time;
-      this.roomRing.material.uniforms.uAlpha.value = spatialLayerPresence
-        * spatialInteractionPresence
-        * THREE.MathUtils.lerp(0.01, 0.045, hoverPresence * 0.55 + this.detailFocusProgress * 0.45);
-    }
-
-    if (this.forcefield) {
-      this.forcefield.visible = spatialLayerPresence > 0.01 && spatialInteractionPresence > 0.02;
-      this.forcefield.position.set(
-        this.pointerCurrent.x * 0.1 * pointerInfluence,
-        cameraTrackY - 0.08,
-        -0.15
-      );
-      this.forcefield.rotation.y = this.time * 0.12;
-      this.forcefield.rotation.z = this.pointerCurrent.x * 0.08 * pointerInfluence;
-      this.forcefield.scale.set(
-        THREE.MathUtils.lerp(1.08, 1.22, this.detailFocusProgress),
-        THREE.MathUtils.lerp(0.76, 0.94, hoverPresence * 0.4 + this.detailFocusProgress * 0.6),
-        THREE.MathUtils.lerp(1.08, 1.22, this.detailFocusProgress)
-      );
-      this.forcefield.material.uniforms.uTime.value = this.time;
-      this.forcefield.material.uniforms.uAlpha.value = spatialLayerPresence
-        * spatialInteractionPresence
-        * THREE.MathUtils.lerp(0.008, 0.025, hoverPresence * 0.55 + this.detailFocusProgress * 0.45);
-    }
-
-    this.textCylinders.forEach((mesh, index) => {
-      const opacityBias = index === 0 ? 0.16 : 0.1;
-      mesh.visible = spatialLayerPresence > 0.01;
-      mesh.position.y = cameraTrackY + (index === 0 ? -0.12 : 0.16);
-      mesh.position.x = this.pointerCurrent.x * 0.08 * pointerInfluence * (index === 0 ? 1 : -0.6);
-      mesh.rotation.y += delta * (index === 0 ? 0.05 : -0.04);
-      mesh.material.uniforms.uTime.value = this.time;
-      mesh.material.uniforms.uAlpha.value = spatialLayerPresence
-        * THREE.MathUtils.lerp(opacityBias * 0.7, opacityBias + 0.04, hoverPresence * 0.55 + this.detailFocusProgress * 0.45);
-    });
-
-    this.camera.position.x = this.pointerCurrent.x * 0.35 * pointerInfluence;
+    this.camera.position.x = this.pointerCurrent.x * 0.1 * pointerInfluence;
     this.camera.position.y = cameraTrackY;
-    this.camera.position.z = THREE.MathUtils.lerp(5.6 + entryLift * 1.1, 7.9, exitProgress)
-      + motionBlurAmount * 0.5
-      - hoverPresence * 0.18
-      - this.detailFocusProgress * 0.22;
-    this.camera.fov = THREE.MathUtils.lerp(
-      this.baseCameraFov,
-      this.baseCameraFov + motionBlurAmount * 14 - hoverPresence * 2.1 - this.detailFocusProgress * 3.2,
-      0.28
-    );
+    this.camera.position.z = this.baseCameraPosition.z + THREE.MathUtils.lerp(0, -3.5, focusProgress);
+    this.camera.fov = 45 - 5 * motionBlurAmount;
     this.camera.updateProjectionMatrix();
     this.camera.lookAt(
-      this.pointerCurrent.x * 0.22 * pointerInfluence,
-      cameraTrackY + this.pointerCurrent.y * 0.18 * pointerInfluence,
+      this.pointerCurrent.x * 0.05 * pointerInfluence,
+      cameraTrackY + this.pointerCurrent.y * 0.05 * pointerInfluence,
       0
     );
     this.camera.updateMatrixWorld();
@@ -1869,11 +1817,10 @@ export class CubesScene extends SceneBase {
       const cubeGroup = this.cubeGroups[index];
       const baseState = this.cubeBaseStates[index];
       const isFocused = this.detailFocusIndex === index;
-      const centerPresence = 1 - smoothWindow(Math.abs(baseState.centeredProgress - this.progress), 0.1, 0.45);
-      const detailHandoffProgress = isFocused
-        ? THREE.MathUtils.smoothstep(this.detailFocusProgress, 0.34, 0.98)
-        : 0;
       const runtimeScrollDistance = baseState.position.y + focusOffset - cameraTrackY;
+      const presence = focusProgress > 0
+        ? THREE.MathUtils.lerp(1, isFocused ? 1 : 0.15, focusProgress)
+        : 1;
 
       cubeGroup.updateMatrixWorld(true);
       cubeGroup.getWorldPosition(this.labelWorldPosition);
@@ -1881,10 +1828,7 @@ export class CubesScene extends SceneBase {
         delta: safeDelta,
         time: this.time,
         scrollDistance: runtimeScrollDistance,
-        presence: enterProgress
-          * (1 - exitProgress * 0.92)
-          * (1 - detailHandoffProgress * 0.84),
-        camera: this.camera,
+        presence,
         cameraQuaternion: this.cameraWorldQuaternion,
         cameraRight: this.uiCameraRight,
         cameraUp: this.uiCameraUp,
@@ -1899,9 +1843,9 @@ export class CubesScene extends SceneBase {
       cubeGroup.getWorldQuaternion(this.parentWorldQuaternion);
       this.inverseParentQuaternion.copy(this.parentWorldQuaternion).invert();
       smokeMesh.quaternion.copy(this.inverseParentQuaternion.multiply(this.cameraWorldQuaternion));
-      smokeMesh.material.opacity = THREE.MathUtils.lerp(0.65, 1.2, this.hoveredProjectIndex === index ? 1 : 0)
-        + frostEnergy * 0.35;
-      smokeMesh.material.opacity *= this.lookDebugSettings.smokeOpacityScale;
+      smokeMesh.material.opacity = (0.88 + frostEnergy * 0.12)
+        * this.lookDebugSettings.smokeOpacityScale
+        * THREE.MathUtils.lerp(1, 0.45, focusProgress);
     });
   }
 

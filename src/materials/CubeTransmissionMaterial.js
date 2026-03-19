@@ -160,26 +160,24 @@ export class CubeTransmissionMaterial extends THREE.MeshPhysicalMaterial {
         vec4 blueNoise = getBlueNoise(gl_FragCoord.xy, uBlueOffset);
         float distortionNoise = (blueNoise.r - 0.5) * 0.03;
         float frostSuppression = 1.0 - mouseFrost * 0.78;
-        vec2 distortion = normal.xy * (0.04 + roughnessFactor * roughnessFactor * 0.1 * frostSuppression);
-        distortion += mouseFrost * 0.018;
+        vec2 distortion = normal.xy * (0.034 + roughnessFactor * roughnessFactor * 0.08 * frostSuppression);
+        distortion += mouseFrost * 0.014;
         distortion += vec2(distortionNoise, (blueNoise.g - 0.5) * 0.016);
 
         float fresnel = pow(1.0 - clamp(dot(normalize(normal), normalize(vViewPosition)), 0.0, 1.0), 2.0);
         vec3 transmitted = sampleTransmission(screenUv, distortion * (1.0 - fresnel * 0.12));
-        transmitted = pow(max(transmitted, vec3(0.0)), vec3(1.08));
+        transmitted = pow(max(transmitted, vec3(0.0)), vec3(0.95));
 
-        vec3 shellShadow = diffuseColor.rgb * (0.035 + (1.0 - fresnel) * 0.08);
-        vec3 shellRim = vec3(1.0) * fresnel * 0.095;
-        vec3 frostGlow = uColorFrost * mouseFrostRim * 0.65;
-        frostGlow += uColorFrost * trianglePattern * mouseFrostRim * 1.35;
-        frostGlow += vec3(trianglePattern * mouseFrost * mouseFrost * 0.2);
+        totalEmissiveRadiance += mouseFrostRim * uColorFrost;
+        totalEmissiveRadiance += trianglePattern * mouseFrostRim * uColorFrost * 1.6;
+        totalEmissiveRadiance += vec3(trianglePattern * pow(mouseFrost, 2.0) * 0.35);
 
-        vec3 outgoingLight = transmitted * 1.06
-          + totalSpecular * 0.72
+        vec3 shellRim = vec3(1.0) * fresnel * 0.08;
+        vec3 outgoingLight = transmitted * 0.96
+          + totalDiffuse * 0.28
+          + totalSpecular
           + totalEmissiveRadiance
-          + shellRim
-          + frostGlow
-          - shellShadow;
+          + shellRim;
         outgoingLight = clamp(outgoingLight, vec3(0.0), vec3(1.0));
         `
       );

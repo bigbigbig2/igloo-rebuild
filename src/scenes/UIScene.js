@@ -448,6 +448,9 @@ export class UIScene {
     const isHome = route?.name === 'home';
     const suppressIglooDom = useWebglUi && isHome && activeSectionKey === 'igloo' && !hasProject;
     const suppressCubesDom = useWebglUi && isHome && activeSectionKey === 'cubes' && !hasProject;
+    const suppressRoot = suppressCubesDom;
+
+    this.root.style.display = suppressRoot ? 'none' : '';
 
     this.setPanelDisplay(this.manifestoShell, !suppressIglooDom && !suppressCubesDom);
     this.setPanelDisplay(this.footer, !suppressIglooDom && !suppressCubesDom);

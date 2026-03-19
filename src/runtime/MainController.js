@@ -232,7 +232,8 @@ export class MainController {
 
     event.preventDefault();
     this.markScrollInteraction();
-    this.scrollState.nudge(event.deltaY * 0.0015);
+    const wheelScale = this.homeSceneStack.getActiveSection()?.key === 'cubes' ? 0.0018 : 0.0015;
+    this.scrollState.nudge(event.deltaY * wheelScale);
   }
 
   onKeyDown(event) {
@@ -265,6 +266,10 @@ export class MainController {
     // 统一记录最近一次用户主动滚动输入的时间。
     // maybeAutoCenter 会用它来判断“是否已经静止足够久”。
     this.lastScrollInputTime = performance.now() * 0.001;
+  }
+
+  centerScroll(value, duration = 1.6) {
+    this.scrollState.animateTo(value, duration);
   }
 
   resolveAutoCenterTarget(metric, progress) {
@@ -330,11 +335,15 @@ export class MainController {
       return;
     }
 
-    if (elapsed - this.lastScrollInputTime < this.scrollIdleDelay) {
+    const activeSectionKey = this.homeState?.key ?? this.homeSceneStack.getActiveSection()?.key ?? null;
+    const idleDelay = activeSectionKey === 'cubes' ? 0.48 : this.scrollIdleDelay;
+    const cooldown = activeSectionKey === 'cubes' ? 0.3 : 0.6;
+
+    if (elapsed - this.lastScrollInputTime < idleDelay) {
       return;
     }
 
-    if (elapsed - this.lastAutoCenterTime < 0.6) {
+    if (elapsed - this.lastAutoCenterTime < cooldown) {
       return;
     }
 
@@ -344,6 +353,27 @@ export class MainController {
     ) {
       // 只要滚动还在明显运动中，就不主动抢控制权。
       return;
+    }
+
+    if (activeSectionKey === 'cubes') {
+      const cubesOffset = this.sections.cubes?.getAutoCenterOffset?.() ?? null;
+
+      if (cubesOffset != null) {
+        const target = clamp(
+          this.scrollState.current + cubesOffset,
+          this.scrollState.min,
+          this.scrollState.max
+        );
+
+        if (
+          Math.abs(target - this.scrollState.current) >= 0.02
+          || Math.abs(target - this.scrollState.target) >= 0.02
+        ) {
+          this.lastAutoCenterTime = elapsed;
+          this.centerScroll(target, clamp(Math.abs(cubesOffset) * 6, 1.6, 2.4));
+        }
+        return;
+      }
     }
 
     const target = this.getAutoCenterTarget();
@@ -360,7 +390,7 @@ export class MainController {
     }
 
     this.lastAutoCenterTime = elapsed;
-    this.scrollState.setTarget(target);
+    this.centerScroll(target, 1.25);
   }
 
   isCubesInteractive() {
