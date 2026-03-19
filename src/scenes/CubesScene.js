@@ -76,6 +76,15 @@ const CUBES_BG_FRAGMENT_SHADER = /* glsl */ `
     return texture2D(tBlue, fragCoord * invSize + uBlueOffset);
   }
 
+  float sampleSoftPerlin(vec2 uv, vec2 offset) {
+    vec2 blur = vec2(0.0025, 0.0025);
+    float value = texture2D(tPerlin, uv + offset).r;
+    value += texture2D(tPerlin, uv + offset + blur * vec2(1.0, -1.0)).r;
+    value += texture2D(tPerlin, uv + offset + blur * vec2(-1.2, 0.8)).r;
+    value += texture2D(tPerlin, uv + offset + blur * vec2(0.6, 1.3)).r;
+    return value * 0.25;
+  }
+
   void main() {
     vec2 screenUv = vUv;
     screenUv.x *= max(uAspect, 0.0001);
@@ -87,11 +96,12 @@ const CUBES_BG_FRAGMENT_SHADER = /* glsl */ `
     offset1.y -= uProgress * 0.25;
     offset1.y -= uProgress * 0.4;
 
-    float perlin = texture2D(tPerlin, screenUv + offset1).r;
-    perlin += texture2D(tPerlin, screenUv * 0.5 + offset2).r;
+    float perlin = sampleSoftPerlin(screenUv, offset1);
+    perlin += sampleSoftPerlin(screenUv * 0.5, offset2);
     perlin *= 0.5;
 
-    vec3 color = mix(uColor1, uColor2, perlin);
+    float grad = smoothstep(0.08, 0.92, perlin);
+    vec3 color = mix(uColor1, uColor2, grad * 0.82);
 
     vec2 dotUv = screenUv * 45.0;
     dotUv += vec2(0.0, -uProgress * 10.0);
@@ -532,7 +542,7 @@ const TEXT_CYLINDER_FRAGMENT_SHADER = /* glsl */ `
 `;
 
 const DEFAULT_CUBES_LOOK_SETTINGS = Object.freeze({
-  lutIntensity: 0.08,
+  lutIntensity: 0.12,
   bloomStrength: 0,
   bloomRadius: 0.62,
   bloomThreshold: 0.72,
@@ -747,7 +757,7 @@ export class CubesScene extends SceneBase {
   constructor({ assets, projects, clickLabel = 'Click to explore' }) {
     super({
       name: 'cubes',
-      background: '#c9d0df'
+      background: '#d3dbe8'
     });
 
     // -------- 运行时状态 --------
@@ -867,8 +877,8 @@ export class CubesScene extends SceneBase {
           uProgress: { value: 0 },
           uAspect: { value: 1 },
           uResolution: { value: new THREE.Vector2(1, 1) },
-          uColor1: { value: new THREE.Color('#c9d0df') },
-          uColor2: { value: new THREE.Color('#545b6b') },
+          uColor1: { value: new THREE.Color('#d8e0ec') },
+          uColor2: { value: new THREE.Color('#6c7688') },
           tPerlin: { value: this.perlinData ?? null },
           tDotPattern: { value: this.dotPattern ?? null },
           tBlue: { value: this.blueNoise },

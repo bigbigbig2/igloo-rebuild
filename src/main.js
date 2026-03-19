@@ -1,4 +1,5 @@
 import './style.css';
+import { AudioDebugGui } from './debug/AudioDebugGui.js';
 import { EventBus } from './core/EventBus.js';
 import { Router } from './core/Router.js';
 import { Engine } from './core/Engine.js';
@@ -100,6 +101,9 @@ bus.on('assets:progress', ({ loaded, total, group, key }) => {
 async function bootstrap() {
   try {
     await controller.init();
+    audioDebugGui = new AudioDebugGui({
+      controller: window.controller ?? controller
+    });
     await hideBootLoader();
     router.start();
     window.controller = controller;

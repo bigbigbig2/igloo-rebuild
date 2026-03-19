@@ -12,10 +12,10 @@ export class CubeTransmissionMaterial extends THREE.MeshPhysicalMaterial {
     ...parameters
   } = {}) {
     super({
-      color: '#e0e8ef',
-      roughness: 0.65,
+      color: '#edf4ff',
+      roughness: 0.58,
       metalness: 0.08,
-      envMapIntensity: 0.91,
+      envMapIntensity: 1.08,
       reflectivity: 0.3,
       ior: 1.18,
       transmission: 0,
@@ -172,10 +172,10 @@ export class CubeTransmissionMaterial extends THREE.MeshPhysicalMaterial {
         totalEmissiveRadiance += trianglePattern * mouseFrostRim * uColorFrost * 1.6;
         totalEmissiveRadiance += vec3(trianglePattern * pow(mouseFrost, 2.0) * 0.35);
 
-        vec3 shellRim = vec3(1.0) * fresnel * 0.08;
-        vec3 outgoingLight = transmitted * 0.96
-          + totalDiffuse * 0.28
-          + totalSpecular
+        vec3 shellRim = vec3(1.0) * fresnel * 0.11;
+        vec3 outgoingLight = transmitted * 1.04
+          + totalDiffuse * 0.34
+          + totalSpecular * 1.08
           + totalEmissiveRadiance
           + shellRim;
         outgoingLight = clamp(outgoingLight, vec3(0.0), vec3(1.0));
