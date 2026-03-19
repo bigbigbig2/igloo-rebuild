@@ -45,10 +45,10 @@ export class SceneBase extends THREE.Scene {
 
     // 首页大部分场景使用透视相机，少数纯屏幕空间场景会用正交相机。
     if (cameraType === 'orthographic') {
-      this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 100);
+      this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 1000);
       this.camera.position.set(0, 0, 10);
     } else {
-      this.camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
+      this.camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
       this.camera.position.set(0, 0, 8);
     }
   }

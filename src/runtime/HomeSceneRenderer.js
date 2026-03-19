@@ -471,6 +471,52 @@ function getColorCorrectionState(scene) {
   return null;
 }
 
+function normalizeBloomState(state) {
+  if (!state) {
+    return {
+      bloomStrength: 0,
+      bloomRadius: 0.35,
+      bloomThreshold: 0.8
+    };
+  }
+
+  return {
+    ...state,
+    bloomStrength: state.bloomStrength ?? 0,
+    bloomRadius: state.bloomRadius ?? 0.35,
+    bloomThreshold: state.bloomThreshold ?? 0.8
+  };
+}
+
+function blendBloomStates(currentState, nextState, blend) {
+  const currentBloom = normalizeBloomState(currentState);
+  const nextBloom = normalizeBloomState(nextState);
+  const mixValue = THREE.MathUtils.clamp(blend ?? 0, 0, 1);
+  const currentWeight = 1 - mixValue;
+  const nextWeight = mixValue;
+  const strength =
+    currentBloom.bloomStrength * currentWeight
+    + nextBloom.bloomStrength * nextWeight;
+
+  if (strength <= 0.001) {
+    return {
+      ...nextBloom,
+      bloomStrength: 0
+    };
+  }
+
+  return {
+    ...(nextWeight >= currentWeight ? nextBloom : currentBloom),
+    bloomStrength: strength,
+    bloomRadius:
+      currentBloom.bloomRadius * currentWeight
+      + nextBloom.bloomRadius * nextWeight,
+    bloomThreshold:
+      currentBloom.bloomThreshold * currentWeight
+      + nextBloom.bloomThreshold * nextWeight
+  };
+}
+
 /**
  * HomeSceneRenderer 是首页真正的“组合渲染器”。
  *
@@ -857,7 +903,7 @@ export class HomeSceneRenderer {
     );
     this.compositeMaterial.uniforms.uBlueOffset.value.copy(this.blueOffset);
 
-    let bloomState = blend > 0.5 ? nextColorState : currentColorState;
+    let bloomState = blendBloomStates(currentColorState, nextColorState, blend);
     const iglooToCubesBlend =
       currentScene?.name === 'igloo' &&
       nextScene?.name === 'cubes' &&

@@ -16,7 +16,7 @@ import { computePresentationState, updateEntryScene } from './entry/choreography
  */
 export class EntryScene extends SceneBase {
   constructor({ assets }) {
-    super({ name: 'entry', background: '#d4dae4' });
+    super({ name: 'entry', background: '#09070e' });
 
     this.assets = assets;
     this.resolution = new THREE.Vector2(1, 1);
@@ -51,9 +51,9 @@ export class EntryScene extends SceneBase {
       profile: 'entry',
       ringProximity: this.postState.ringProximity,
       squareAttr: this.postState.squareAttr,
-      bloomStrength: 0.9,
-      bloomRadius: 0.85,
-      bloomThreshold: 0
+      bloomStrength: 0.16,
+      bloomRadius: 0.6,
+      bloomThreshold: 0.72
     };
   }
 

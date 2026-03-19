@@ -21,11 +21,11 @@ export class Engine {
       powerPreference: 'high-performance'
     });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMapping = THREE.NoToneMapping;
     this.renderer.toneMappingExposure = 1;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    this.renderer.setClearColor('#070b10');
+    this.renderer.setClearColor('#000000');
 
     this.container.appendChild(this.renderer.domElement);
 

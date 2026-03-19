@@ -286,7 +286,7 @@ export function createLightroomMaterial(dotPattern) {
     `,
     side: THREE.BackSide,
     depthWrite: false,
-    toneMapped: false
+    toneMapped: true
   });
 }
 
