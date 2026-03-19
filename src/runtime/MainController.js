@@ -81,6 +81,7 @@ export class MainController {
     this.scrollIdleDelay = 1.1;
     this.lastScrollInputTime = 0;
     this.lastAutoCenterTime = -Infinity;
+    this.entryInteractionAudioEnabled = false;
     // homeState 保存首页当前 section 的运行结果，供渲染和 UI 消费。
     this.homeState = {
       key: this.content.sections[0]?.key ?? null,
@@ -102,7 +103,10 @@ export class MainController {
       onHome: () => this.goHome(),
       onPrevious: () => this.moveToSection(this.homeSceneStack.currentSectionIndex - 1),
       onNext: () => this.moveToSection(this.homeSceneStack.currentSectionIndex + 1),
-      onProject: (hash) => this.openProject(hash)
+      onProject: (hash) => this.openProject(hash),
+      onEntryLinkPreview: (index) => this.previewEntryLink(index),
+      onEntryLinkPreviewClear: () => this.clearEntryLinkPreview(),
+      onEntryLinkOpen: (index) => this.activateEntryLink(index)
     });
 
     // 注册运行时事件：路由变化、每帧 tick、音频状态变化、输入事件等。
@@ -133,7 +137,10 @@ export class MainController {
         projects: this.content.projects,
         clickLabel: this.content.clickLabel
       }),
-      entry: new EntryScene({ assets: this.assets })
+      entry: new EntryScene({
+        assets: this.assets,
+        links: this.content.links
+      })
     };
     // 把 scene 实例注入 HomeSceneStack，后续由它统一广播 progress 和 transitionState。
     this.homeSceneStack.setScenes(this.sections);
@@ -215,6 +222,49 @@ export class MainController {
     }
 
     this.routeSync.goProject(hash);
+  }
+
+  isEntryInteractive() {
+    if (!this.ready || this.route.name !== 'home') {
+      return false;
+    }
+
+    if (this.detailTransition.progress > 0.001 || this.detailTransition.target > 0.001) {
+      return false;
+    }
+
+    return this.homeSceneStack.getActiveSection()?.key === 'entry';
+  }
+
+  previewEntryLink(index) {
+    if (!this.isEntryInteractive()) {
+      return;
+    }
+
+    const changed = this.sections.entry?.previewLink?.(index, { burstNoise: 0.72 }) ?? false;
+    if (!changed) {
+      return;
+    }
+
+    this.audio?.play('ui-short');
+    this.syncUi();
+  }
+
+  clearEntryLinkPreview() {
+    const changed = this.sections.entry?.clearPreviewLink?.({ burstNoise: 0.35 }) ?? false;
+    if (changed) {
+      this.syncUi();
+    }
+  }
+
+  activateEntryLink(index) {
+    if (!this.isEntryInteractive()) {
+      return;
+    }
+
+    this.sections.entry?.previewLink?.(index, { burstNoise: 1 });
+    this.audio?.play('ui-long');
+    this.syncUi();
   }
 
   moveToSection(index) {
@@ -586,7 +636,20 @@ export class MainController {
     // 每帧都重新同步首页 section 状态，再把结果交给 renderer。
     this.syncHomeScene();
     const cubesAudioState = this.sections.cubes?.getAudioState?.() ?? null;
+    const entryAudioState = this.sections.entry?.getAudioState?.() ?? null;
     this.audio?.setTrackTargetMix('shard', cubesAudioState?.shardMix ?? 0);
+    this.audio?.setTrackTargetMix('particles', entryAudioState?.particlesMix ?? 0);
+
+    const entryInteractionEnabled = Boolean(
+      this.route.name === 'home'
+      && this.homeState?.key === 'entry'
+      && entryAudioState?.interactionEnabled
+    );
+    if (entryInteractionEnabled !== this.entryInteractionAudioEnabled) {
+      this.entryInteractionAudioEnabled = entryInteractionEnabled;
+      this.audio?.play('ui-long');
+    }
+
     this.audio?.update(delta, {
       routeName: this.route.name,
       activeSectionKey: this.homeState?.key ?? null,
@@ -658,7 +721,7 @@ export class MainController {
       interactionLabel: this.currentProject && this.detailPhases.uiProgress > 0.08
         ? (this.content.closeLabel ?? 'Back Home')
         : activeSection?.key === 'entry'
-          ? 'Click a portal link or scroll back through the reconstructed flow.'
+          ? 'Hover or click a portal link, or scroll back through the reconstructed flow.'
           : this.hoveredProject
             ? `${this.content.clickLabel ?? 'Click to explore'} ${this.hoveredProject.title}`
             : (this.content.scrollLabel ?? 'Scroll or use arrow keys to move between reconstructed sections.'),

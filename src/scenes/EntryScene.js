@@ -15,10 +15,11 @@ import { computePresentationState, updateEntryScene } from './entry/choreography
  * 不需要再在一个超大文件里硬塞更多逻辑。
  */
 export class EntryScene extends SceneBase {
-  constructor({ assets }) {
+  constructor({ assets, links = [] }) {
     super({ name: 'entry', background: '#09070e' });
 
     this.assets = assets;
+    this.links = links;
     this.resolution = new THREE.Vector2(1, 1);
     this.portalRings = [];
     this.forcefields = [];
@@ -28,6 +29,15 @@ export class EntryScene extends SceneBase {
     this.initialScrollAutocenter = 0.2;
     this.finalScrollAutocenter = 0.76;
     this.presentationState = computePresentationState(0, 1);
+    this.activeLinkIndex = 0;
+    this.autoLinkIndex = 0;
+    this.previewLinkIndex = null;
+    this.linkInteractionEnabled = false;
+    this.audioState = {
+      particlesMix: 0,
+      interactionEnabled: false,
+      interactionForce: 0
+    };
     this.postState = {
       ringProximity: 0,
       squareAttr: new THREE.Vector3(0, 0, 1)
@@ -35,7 +45,7 @@ export class EntryScene extends SceneBase {
     this.lastProgress = 0;
     this.direction = 1;
 
-    buildEntryScene(this, { assets });
+    buildEntryScene(this, { assets, links });
   }
 
   computePresentationState(progress = this.progress, enterProgress = 1) {
@@ -43,7 +53,16 @@ export class EntryScene extends SceneBase {
   }
 
   getPresentationState() {
-    return { ...this.presentationState };
+    return {
+      ...this.presentationState,
+      interactionEnabled: this.linkInteractionEnabled,
+      activeLinkIndex: this.activeLinkIndex,
+      activeLink: this.links[this.activeLinkIndex] ?? null
+    };
+  }
+
+  getAudioState() {
+    return this.audioState;
   }
 
   getColorCorrectionState() {
@@ -84,5 +103,72 @@ export class EntryScene extends SceneBase {
 
   update(delta, elapsed) {
     updateEntryScene(this, delta, elapsed);
+  }
+
+  prepareForRender(renderer) {
+    this.particles?.prewarm?.(renderer, this.active ? 10 : 4);
+  }
+
+  setActiveLinkIndex(index, { burstNoise = 1 } = {}) {
+    if (!Number.isFinite(index) || this.links.length <= 0) {
+      return false;
+    }
+
+    const nextIndex = THREE.MathUtils.clamp(Math.round(index), 0, this.links.length - 1);
+    if (nextIndex === this.activeLinkIndex) {
+      return false;
+    }
+
+    this.activeLinkIndex = nextIndex;
+    this.particles?.setVolume?.(nextIndex, { burstNoise });
+    return true;
+  }
+
+  setAutoLinkIndex(index, { burstNoise = 1 } = {}) {
+    if (!Number.isFinite(index) || this.links.length <= 0) {
+      return false;
+    }
+
+    this.autoLinkIndex = THREE.MathUtils.clamp(Math.round(index), 0, this.links.length - 1);
+
+    if (this.previewLinkIndex != null) {
+      return false;
+    }
+
+    return this.setActiveLinkIndex(this.autoLinkIndex, { burstNoise });
+  }
+
+  previewLink(index, { burstNoise = 1 } = {}) {
+    if (!this.linkInteractionEnabled || !Number.isFinite(index) || this.links.length <= 0) {
+      return false;
+    }
+
+    const nextIndex = THREE.MathUtils.clamp(Math.round(index), 0, this.links.length - 1);
+    const previewChanged = this.previewLinkIndex !== nextIndex;
+    this.previewLinkIndex = nextIndex;
+    const activeChanged = this.setActiveLinkIndex(nextIndex, { burstNoise });
+    return previewChanged || activeChanged;
+  }
+
+  clearPreviewLink({ burstNoise = 0.35 } = {}) {
+    if (this.previewLinkIndex == null) {
+      return false;
+    }
+
+    this.previewLinkIndex = null;
+    return this.setActiveLinkIndex(this.autoLinkIndex, { burstNoise });
+  }
+
+  setLinkInteractionEnabled(enabled) {
+    const nextEnabled = Boolean(enabled);
+    const changed = nextEnabled !== this.linkInteractionEnabled;
+
+    if (!nextEnabled && this.previewLinkIndex != null) {
+      this.previewLinkIndex = null;
+      this.setActiveLinkIndex(this.autoLinkIndex, { burstNoise: 0.3 });
+    }
+
+    this.linkInteractionEnabled = nextEnabled;
+    return changed;
   }
 }

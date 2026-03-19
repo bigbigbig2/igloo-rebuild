@@ -77,12 +77,17 @@ export const assetManifest = {
     { section: 'cubes', key: 'abstract-inner-color', source: '/reference-assets/images/cubes/abstractlogo_color.ktx2', colorSpace: 'srgb' },
     { section: 'ui', key: 'ui-logo', source: '/reference-assets/ui/logo-datatexture.ktx2' },
     { section: 'ui', key: 'ui-sound', source: '/reference-assets/ui/sound-datatexture.ktx2' },
+    { section: 'ui', key: 'ui-arrow', source: '/reference-assets/ui/arrow-datatexture.ktx2' },
+    { section: 'ui', key: 'ui-visit', source: '/reference-assets/ui/visit-datatexture.ktx2' },
     { section: 'ui', key: 'ui-font-mono', source: '/reference-assets/fonts/IBMPlexMono-Medium-datatexture.ktx2' },
     { section: 'entry', key: 'floor-color', source: '/reference-assets/images/floor_color.ktx2', colorSpace: 'srgb' },
     { section: 'entry', key: 'ring-color', source: '/reference-assets/images/shattered_ring_color.ktx2', colorSpace: 'srgb' },
     { section: 'entry', key: 'ring-ao', source: '/reference-assets/images/shattered_ring_ao.ktx2' },
     { section: 'entry', key: 'ring-secondary-color', source: '/reference-assets/images/shattered_ring2_color.ktx2', colorSpace: 'srgb' },
     { section: 'entry', key: 'ring-secondary-ao', source: '/reference-assets/images/shattered_ring2_ao.ktx2' },
+    { section: 'entry', key: 'entry-volume-peachesbody_64', source: '/reference-assets/images/volumes/peachesbody_64.ktx2' },
+    { section: 'entry', key: 'entry-volume-x_64', source: '/reference-assets/images/volumes/x_64.ktx2' },
+    { section: 'entry', key: 'entry-volume-medium_32', source: '/reference-assets/images/volumes/medium_32.ktx2' },
     { section: 'detail', key: 'detail-perlin', source: '/reference-assets/images/detail/perlin-datatexture.ktx2', colorSpace: 'srgb', wrap: 'repeat', repeat: [2, 2] },
     { section: 'detail', key: 'detail-caustics', source: '/reference-assets/images/detail/caustics.ktx2', colorSpace: 'srgb', wrap: 'repeat', repeat: [2, 2] },
     { section: 'detail', key: 'detail-bokeh', source: '/reference-assets/images/detail/bokeh.ktx2', colorSpace: 'srgb', wrap: 'repeat', repeat: [2, 2] },
@@ -101,6 +106,9 @@ export const assetManifest = {
     { section: 'cubes', key: 'beeps2', source: '../www.igloo.inc/assets/audio/beeps2.ogg' },
     { section: 'cubes', key: 'beeps3', source: '../www.igloo.inc/assets/audio/beeps3.ogg' },
     { section: 'cubes', key: 'shard', source: '../www.igloo.inc/assets/audio/shard.ogg' },
-    { section: 'detail', key: 'project-text', source: '../www.igloo.inc/assets/audio/project-text.ogg' }
+    { section: 'detail', key: 'project-text', source: '../www.igloo.inc/assets/audio/project-text.ogg' },
+    { section: 'entry', key: 'particles', source: '/reference-assets/audio/particles.ogg' },
+    { section: 'ui', key: 'ui-long', source: '/reference-assets/audio/ui-long.ogg' },
+    { section: 'ui', key: 'ui-short', source: '/reference-assets/audio/ui-short.ogg' }
   ]
 };

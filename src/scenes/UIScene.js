@@ -48,7 +48,10 @@ export class UIScene {
       home: () => {},
       previous: () => {},
       next: () => {},
-      project: () => {}
+      project: () => {},
+      entryLinkPreview: () => {},
+      entryLinkPreviewClear: () => {},
+      entryLinkOpen: () => {}
     };
 
     // 整个 HUD 是纯 DOM 结构，作为 overlay 挂载到外层 UI 容器。
@@ -120,12 +123,23 @@ export class UIScene {
     this.bindStaticEvents();
   }
 
-  bind({ onHome, onPrevious, onNext, onProject }) {
+  bind({
+    onHome,
+    onPrevious,
+    onNext,
+    onProject,
+    onEntryLinkPreview,
+    onEntryLinkPreviewClear,
+    onEntryLinkOpen
+  }) {
     // 主控制器会把真实行为回注到 DOM HUD。
     this.handlers.home = onHome;
     this.handlers.previous = onPrevious;
     this.handlers.next = onNext;
     this.handlers.project = onProject;
+    this.handlers.entryLinkPreview = onEntryLinkPreview ?? (() => {});
+    this.handlers.entryLinkPreviewClear = onEntryLinkPreviewClear ?? (() => {});
+    this.handlers.entryLinkOpen = onEntryLinkOpen ?? (() => {});
   }
 
   bindStaticEvents() {
@@ -167,8 +181,8 @@ export class UIScene {
         </div>
         <p class="hud__detail-copy hud__entry-block" data-entry-block="copy">External links reconstructed from the original site link registry. This stays in the DOM HUD until the WebGL portal UI is migrated.</p>
         <div class="hud__stack hud__entry-block" data-entry-block="links">
-          ${this.content.links.map((link) => `
-            <a class="hud__card hud__card--link" href="${link.url}" target="_blank" rel="noreferrer">
+          ${this.content.links.map((link, index) => `
+            <a class="hud__card hud__card--link ${index === 0 ? 'is-active' : ''}" data-entry-link-index="${index}" href="${link.url}" target="_blank" rel="noreferrer">
               <h3 class="hud__card-title">${link.label}</h3>
               <p class="hud__card-meta">${link.vdb ?? 'portal'} / scale ${link.scale ?? 1}</p>
             </a>
@@ -182,6 +196,29 @@ export class UIScene {
       copy: this.entryPanel.querySelector('[data-entry-block="copy"]'),
       links: this.entryPanel.querySelector('[data-entry-block="links"]')
     };
+    this.entryLinkCards = Array.from(this.entryPanel.querySelectorAll('[data-entry-link-index]'));
+
+    this.entryLinkCards.forEach((card) => {
+      const index = Number(card.dataset.entryLinkIndex ?? 0);
+      card.addEventListener('pointerenter', () => {
+        this.handlers.entryLinkPreview(index);
+      });
+      card.addEventListener('focus', () => {
+        this.handlers.entryLinkPreview(index);
+      });
+      card.addEventListener('click', () => {
+        this.handlers.entryLinkOpen(index);
+      });
+    });
+
+    this.entryBlocks.links?.addEventListener('pointerleave', () => {
+      this.handlers.entryLinkPreviewClear();
+    });
+    this.entryBlocks.links?.addEventListener('focusout', (event) => {
+      if (!this.entryBlocks.links?.contains(event.relatedTarget)) {
+        this.handlers.entryLinkPreviewClear();
+      }
+    });
   }
 
   renderSocialLinks() {
@@ -320,6 +357,14 @@ export class UIScene {
       element.style.opacity = `${reveal}`;
       element.style.transform = `translate3d(0, ${(1 - reveal) * config.offset}px, 0) scale(${0.988 + reveal * 0.012})`;
       element.style.pointerEvents = reveal > 0.72 ? 'auto' : 'none';
+    });
+
+    const activeLinkIndex = entryPresentation?.activeLinkIndex ?? 0;
+    this.entryLinkCards?.forEach((card, index) => {
+      const isActive = isEntryActive && index === activeLinkIndex;
+      card.classList.toggle('is-active', isActive);
+      card.style.opacity = `${isEntryActive ? (isActive ? 1 : 0.72) : 1}`;
+      card.style.transform = isActive ? 'translate3d(0, -2px, 0) scale(1.01)' : '';
     });
 
     if (isEntryActive) {

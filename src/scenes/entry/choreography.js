@@ -143,6 +143,12 @@ const ROOM_TRACKS = {
       { start: 3.9, duration: 1, to: 0, ease: 'power1.inOut' }
     ]
   },
+  particleShowNoise: {
+    initial: 1,
+    segments: [
+      { start: 3.5, duration: 1.5, to: 0, ease: 'power1.inOut' }
+    ]
+  },
   floorAlpha: {
     initial: 0,
     segments: [
@@ -189,6 +195,8 @@ const PLASMA_WINDOWS = [
 
 const RING_ENDS = [0.34, 0.43, 0.52];
 const SMOKE_ENDS = [0.37, 0.47, 0.56];
+const LINK_SWITCH_START = 0.64;
+const LINK_SWITCH_END = 0.9;
 
 function powerExponent(level) {
   return level + 1;
@@ -319,6 +327,29 @@ function fadeWindow(progress, start, end, fadeIn = 0.04, fadeOut = 0.08) {
   return visibleIn * visibleOut;
 }
 
+function computeAutoLinkIndex(progress, count) {
+  if (!count || count <= 1) {
+    return 0;
+  }
+
+  if (progress <= LINK_SWITCH_START) {
+    return 0;
+  }
+
+  if (progress >= LINK_SWITCH_END) {
+    return count - 1;
+  }
+
+  const localProgress = clamp01((progress - LINK_SWITCH_START) / Math.max(LINK_SWITCH_END - LINK_SWITCH_START, 1e-6));
+  return Math.min(count - 1, Math.floor(localProgress * count));
+}
+
+function computeLinkInteractionForce(progress) {
+  const fadeIn = THREE.MathUtils.smoothstep(progress, 0.45, 0.65);
+  const fadeOut = 1 - THREE.MathUtils.smoothstep(progress, 0.8, 0.93);
+  return clamp01(fadeIn * fadeOut);
+}
+
 function applyCameraTimeline(scene, timePosition) {
   CAMERA_POSITION.set(
     0,
@@ -430,6 +461,8 @@ export function updateEntryScene(scene, delta, elapsed) {
   }, 0);
 
   scene.presentationState = computePresentationState(progress, enterProgress);
+  scene.presentationState.activeLinkIndex = scene.activeLinkIndex;
+  scene.presentationState.activeLink = scene.links?.[scene.activeLinkIndex] ?? null;
 
   const { upRotation } = applyCameraTimeline(scene, timePosition);
   const roomRingReveal = smoothWindow(progress, 0.53, 0.64);
@@ -444,6 +477,18 @@ export function updateEntryScene(scene, delta, elapsed) {
   const ambientReveal = sampleTrack(ROOM_TRACKS.ambientAlpha, timePosition);
   const particleReveal = sampleTrack(ROOM_TRACKS.particleAlpha, timePosition);
   const particleInitialGlow = sampleTrack(ROOM_TRACKS.particleInitialGlow, timePosition);
+  const particleShowNoise = sampleTrack(ROOM_TRACKS.particleShowNoise, timePosition);
+  const autoLinkIndex = computeAutoLinkIndex(progress, scene.links?.length ?? 0);
+  const linkInteractionEnabled = progress > LINK_SWITCH_START && progress < LINK_SWITCH_END;
+  const linkInteractionForce = computeLinkInteractionForce(progress);
+
+  scene.setLinkInteractionEnabled?.(linkInteractionEnabled);
+  scene.setAutoLinkIndex?.(autoLinkIndex, {
+    burstNoise: progress > LINK_SWITCH_START ? 0.85 : 0.4
+  });
+  scene.presentationState.activeLinkIndex = scene.activeLinkIndex;
+  scene.presentationState.activeLink = scene.links?.[scene.activeLinkIndex] ?? null;
+  scene.presentationState.interactionEnabled = scene.linkInteractionEnabled;
 
   if (scene.lightroom?.material?.uniforms?.uTime) {
     scene.lightroom.material.uniforms.uTime.value = elapsed;
@@ -519,15 +564,19 @@ export function updateEntryScene(scene, delta, elapsed) {
     const visible = timePosition >= 4.5 || textReveal > 0.001;
     scene.textCylinder.visible = visible;
     scene.textCylinder2.visible = visible;
+    scene.textCylinder.material.uniforms.uTime.value = elapsed;
+    scene.textCylinder2.material.uniforms.uTime.value = elapsed;
     scene.textCylinder.material.uniforms.uAlpha.value = textReveal;
     scene.textCylinder2.material.uniforms.uAlpha.value = textReveal;
   }
 
   if (scene.textCylinder3) {
+    scene.textCylinder3.material.uniforms.uTime.value = elapsed;
     scene.textCylinder3.rotation.y = upRotation * 0.65 + 2;
   }
 
   if (scene.textCylinder4) {
+    scene.textCylinder4.material.uniforms.uTime.value = elapsed;
     scene.textCylinder4.rotation.y = upRotation * 0.65;
   }
 
@@ -551,19 +600,66 @@ export function updateEntryScene(scene, delta, elapsed) {
 
   if (scene.particles) {
     scene.particles.visible = timePosition >= 1.5 || particleReveal > 0.001;
-    scene.particles.rotation.y -= delta * (0.08 + portalCoreProgress * 0.08);
-    scene.particles.rotation.x = Math.sin(elapsed * 0.25) * 0.06;
     scene.particles.position.y = -9.785 + Math.sin(elapsed * 0.32) * 0.025 * particleReveal;
-    scene.particles.scale.setScalar(THREE.MathUtils.lerp(0.9, 1.08, particleReveal) * (1 + portalCoreProgress * 0.05));
-    scene.particles.material.uniforms.uTime.value = elapsed;
-    scene.particles.material.uniforms.uOpacity.value = particleReveal * (0.92 + interactionPulse * 0.08);
-    scene.particles.material.uniforms.uSize.value = THREE.MathUtils.lerp(
+    if (scene.particles.isVolumeParticleField) {
+      scene.particles.rotation.set(0, 0, 0);
+      scene.particles.scale.setScalar(1);
+    } else {
+      scene.particles.rotation.y -= delta * (0.08 + portalCoreProgress * 0.08);
+      scene.particles.rotation.x = Math.sin(elapsed * 0.25) * 0.06;
+      scene.particles.scale.setScalar(THREE.MathUtils.lerp(0.9, 1.08, particleReveal) * (1 + portalCoreProgress * 0.05));
+    }
+    const particleSize = THREE.MathUtils.lerp(
       0.048,
       0.082,
       clamp01(particleReveal * 0.9 + portalCoreProgress * 0.25)
     );
-    scene.particles.material.uniforms.uInitialGlow.value = particleInitialGlow;
+    const particleAlpha = particleReveal * (0.92 + interactionPulse * 0.08);
+    const particleMaterial = scene.particles.material;
+
+    if (particleMaterial?.uniforms?.uTime) {
+      particleMaterial.uniforms.uTime.value = elapsed;
+    }
+    if (particleMaterial?.uniforms?.uOpacity) {
+      particleMaterial.uniforms.uOpacity.value = particleAlpha;
+    }
+    if (particleMaterial?.uniforms?.uAlpha) {
+      particleMaterial.uniforms.uAlpha.value = particleAlpha;
+    }
+    if (particleMaterial?.uniforms?.uSize) {
+      particleMaterial.uniforms.uSize.value = particleSize;
+    }
+    if (particleMaterial?.uniforms?.uShowNoise) {
+      particleMaterial.uniforms.uShowNoise.value = particleShowNoise;
+    }
+    if (particleMaterial?.uniforms?.uInitialGlow) {
+      particleMaterial.uniforms.uInitialGlow.value = particleInitialGlow;
+    }
+
+    scene.particles.setSimulationState?.({
+      delta,
+      elapsed,
+      alpha: particleAlpha,
+      size: particleSize,
+      initialGlow: particleInitialGlow,
+      showNoise: particleShowNoise,
+      portalCoreProgress
+    });
   }
+
+  const particleBurstNoise =
+    scene.particles?.material?.uniforms?.uAdditionalNoise?.value
+    ?? scene.particles?.material?.uniforms?.uShowNoise?.value
+    ?? 0;
+  const particleMix = scene.particles?.visible
+    ? THREE.MathUtils.clamp(linkInteractionForce * 0.04 + particleBurstNoise * 0.21, 0, 1)
+    : 0;
+
+  scene.audioState = {
+    particlesMix: particleMix,
+    interactionEnabled: linkInteractionEnabled,
+    interactionForce: linkInteractionForce
+  };
 
   scene.lastProgress = progress;
 }

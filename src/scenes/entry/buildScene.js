@@ -24,8 +24,25 @@ import {
   createTextCylinderMaterial,
   createTunnelMaterial
 } from './materials.js';
+import { EntryVolumeParticles } from './volumeParticles.js';
 
-export function buildEntryScene(scene, { assets }) {
+function resolveVolumeSpecs(assets, links = []) {
+  const fallbackSpecs = [
+    { vdb: 'peachesbody_64', scale: 1.2 },
+    { vdb: 'x_64', scale: 1.3 },
+    { vdb: 'medium_32', scale: 1.25 }
+  ];
+  const sourceSpecs = Array.isArray(links) && links.length > 0 ? links : fallbackSpecs;
+
+  return sourceSpecs
+    .map((link) => ({
+      texture: assets.get('texture', `entry-volume-${link.vdb}`) ?? null,
+      scale: link.scale ?? 1
+    }))
+    .filter((entry) => entry.texture);
+}
+
+export function buildEntryScene(scene, { assets, links = [] }) {
   const windNoise = assets.get('texture', 'wind-noise') ?? assets.get('texture', 'detail-perlin');
   const cloudsNoise = assets.get('texture', 'clouds-noise') ?? windNoise;
   const perlinTexture = assets.get('texture', 'detail-perlin') ?? windNoise;
@@ -117,6 +134,7 @@ export function buildEntryScene(scene, { assets }) {
   })(), createRoomRingMaterial());
   scene.roomRing.position.y = -10.26;
   scene.roomRing.scale.setScalar(0.57);
+  scene.roomRing.renderOrder = 3;
   scene.roomRing.visible = false;
   scene.root.add(scene.roomRing);
   scene.materials.push(scene.roomRing.material);
@@ -164,6 +182,7 @@ export function buildEntryScene(scene, { assets }) {
   })(), createPortalForcefieldMaterial(trianglesTexture));
   scene.portalForcefield.position.y = -10.13;
   scene.portalForcefield.scale.setScalar(0.28);
+  scene.portalForcefield.renderOrder = 15;
   scene.portalForcefield.visible = false;
   scene.root.add(scene.portalForcefield);
   scene.materials.push(scene.portalForcefield.material);
@@ -223,6 +242,7 @@ export function buildEntryScene(scene, { assets }) {
     );
     scene.textCylinder.position.y = -10.33;
     scene.textCylinder.scale.setScalar(1.75);
+    scene.textCylinder.renderOrder = 1;
     scene.textCylinder.visible = false;
     scene.root.add(scene.textCylinder);
     scene.materials.push(scene.textCylinder.material);
@@ -234,6 +254,7 @@ export function buildEntryScene(scene, { assets }) {
     scene.textCylinder2.position.y = -10.33;
     scene.textCylinder2.scale.setScalar(3.5);
     scene.textCylinder2.rotation.y = Math.PI * 0.5;
+    scene.textCylinder2.renderOrder = 0;
     scene.textCylinder2.visible = false;
     scene.root.add(scene.textCylinder2);
     scene.materials.push(scene.textCylinder2.material);
@@ -245,6 +266,7 @@ export function buildEntryScene(scene, { assets }) {
     scene.textCylinder3.position.y = -9.5;
     scene.textCylinder3.scale.set(2, 9, 2);
     scene.textCylinder3.rotation.y = Math.PI;
+    scene.textCylinder3.renderOrder = 0;
     scene.root.add(scene.textCylinder3);
     scene.materials.push(scene.textCylinder3.material);
 
@@ -254,6 +276,7 @@ export function buildEntryScene(scene, { assets }) {
     );
     scene.textCylinder4.position.y = -9.5;
     scene.textCylinder4.scale.set(3.3, 8, 3.3);
+    scene.textCylinder4.renderOrder = -1;
     scene.root.add(scene.textCylinder4);
     scene.materials.push(scene.textCylinder4.material);
   }
@@ -279,23 +302,36 @@ export function buildEntryScene(scene, { assets }) {
   scene.root.add(scene.snowParticles);
   scene.materials.push(scene.snowParticles.material);
 
-  scene.particles = new THREE.Points(
-    createParticleField(12000),
-    createParticleMaterial({ color: '#d0d6e5', opacity: 1, size: 0.055 })
-  );
+  const volumeSpecs = resolveVolumeSpecs(assets, links);
+  const canUseVolumeParticles =
+    volumeSpecs.length > 0
+    && volumeSpecs.every(({ texture }) => texture?.isData3DTexture);
+
+  scene.particles = canUseVolumeParticles
+    ? new EntryVolumeParticles({
+      volumeTextures: volumeSpecs.map(({ texture }) => texture),
+      volumeScales: volumeSpecs.map(({ scale }) => scale)
+    })
+    : new THREE.Points(
+      createParticleField(12000),
+      createParticleMaterial({ color: '#d0d6e5', opacity: 1, size: 0.055 })
+    );
   scene.particles.position.set(0, -9.785, 0);
   scene.particles.visible = false;
   scene.particles.renderOrder = 10;
+  if (scene.particles.points) {
+    scene.particles.points.renderOrder = 10;
+  }
   scene.root.add(scene.particles);
   scene.materials.push(scene.particles.material);
 
   scene.ambientParticles = new THREE.Points(
-    createAmbientParticleField(60),
+    createAmbientParticleField(250),
     createAmbientParticleMaterial()
   );
   scene.ambientParticles.position.y = -9.61;
   scene.ambientParticles.visible = false;
-  scene.ambientParticles.renderOrder = 15;
+  scene.ambientParticles.renderOrder = 1;
   scene.root.add(scene.ambientParticles);
   scene.materials.push(scene.ambientParticles.material);
 

@@ -578,12 +578,13 @@ export function createRoomRingMaterial() {
     `,
     fragmentShader: `
       varying vec2 vUv;
+      uniform float uTime;
       void main() {
         float dist = length(vUv - 0.5);
         float alpha = smoothstep(0.5, 0.3, dist);
         alpha *= smoothstep(0.3, 0.4, dist);
         alpha *= smoothstep(0.03, 0.1, abs(vUv.x - 0.5));
-        alpha *= mix(1.0, 0.8, sin(dist + vUv.x * 2.0 + vUv.y) * 0.5 + 0.5);
+        alpha *= mix(1.0, 0.8, sin(uTime * 2.0 + dist + vUv.x * 2.0 + vUv.y) * 0.5 + 0.5);
         gl_FragColor = vec4(vec3(2.0), alpha);
       }
     `,
@@ -598,6 +599,7 @@ export function createTextCylinderMaterial(atlas, outer = false) {
   return new THREE.ShaderMaterial({
     uniforms: {
       tMap: { value: atlas ?? null },
+      uTime: { value: 0 },
       uAlpha: { value: outer ? 1 : 0 }
     },
     vertexShader: `
@@ -613,15 +615,29 @@ export function createTextCylinderMaterial(atlas, outer = false) {
       }
     `,
     fragmentShader: `
+      ${GLSL_FALLOFF}
       uniform sampler2D tMap;
+      uniform float uTime;
       uniform float uAlpha;
       varying vec2 vUv;
       varying vec3 vPos;
       varying float vRand;
       void main() {
         float alpha = texture2D(tMap, vUv).r;
-        alpha *= ${outer ? '0.25' : 'clamp(vPos.y * 2.0, 0.0, 1.0)'};
-        alpha *= sin(vRand * 10.0 + (vPos.x * 2.0 + vPos.z * 2.0 ${outer ? '+ vPos.y' : ''})) * 0.5 + 0.5;
+
+        ${outer
+    ? `
+        alpha *= sin(uTime * 2.0 + vRand * 10.0 + (vPos.x * 2.0 + vPos.z * 2.0 + vPos.y)) * 0.5 + 0.5;
+        alpha *= 0.25;
+        `
+    : `
+        alpha *= clamp(vPos.y * 2.0, 0.0, 1.0);
+        alpha *= sin(uTime * 2.0 + vRand * 10.0 + (vPos.x * 2.0 + vPos.z * 2.0)) * 0.5 + 0.5;
+        float transition = falloffsmooth(length(vPos.xz), 0.0, 10.0, 3.0, uAlpha);
+        alpha *= transition;
+        alpha *= 0.7;
+        `}
+
         alpha *= uAlpha;
         gl_FragColor = vec4(vec3(1.0), alpha);
       }
@@ -758,6 +774,7 @@ export function createParticleMaterial({ color = '#ffd4a6', opacity = 0.7, size 
       uTime: { value: 0 },
       uOpacity: { value: opacity },
       uSize: { value: size },
+      uShowNoise: { value: 1 },
       uInitialGlow: { value: 1 },
       uColor: { value: new THREE.Color(color) },
       uColorInitial: { value: new THREE.Color('#b5d5ff') },
@@ -767,6 +784,7 @@ export function createParticleMaterial({ color = '#ffd4a6', opacity = 0.7, size 
       attribute float aSeed;
       uniform float uTime;
       uniform float uSize;
+      uniform float uShowNoise;
       varying float vSeed;
       varying float vHeight;
       varying float vRadius;
@@ -774,14 +792,19 @@ export function createParticleMaterial({ color = '#ffd4a6', opacity = 0.7, size 
         vSeed = aSeed;
         vec3 transformed = position;
         float swirl = uTime * mix(0.6, 1.2, aSeed);
-        transformed.x += sin(swirl + position.y * 12.0) * 0.02;
-        transformed.z += cos(swirl * 0.9 + position.x * 10.0) * 0.02;
-        transformed.y += sin(swirl * 1.3 + aSeed * 18.0) * 0.01;
+        float noiseAmount = mix(0.18, 1.0, uShowNoise);
+        transformed.x += sin(swirl + position.y * 12.0) * 0.02 * noiseAmount;
+        transformed.z += cos(swirl * 0.9 + position.x * 10.0) * 0.02 * noiseAmount;
+        transformed.y += sin(swirl * 1.3 + aSeed * 18.0) * 0.01 * noiseAmount;
         vHeight = transformed.y;
         vRadius = length(transformed.xz);
         vec4 mvPosition = modelViewMatrix * vec4(transformed, 1.0);
         gl_Position = projectionMatrix * mvPosition;
-        gl_PointSize = uSize * (1.0 + fract(aSeed * 17.0)) * 140.0 / max(1.0, -mvPosition.z);
+        gl_PointSize =
+          uSize
+          * mix(0.92, 1.12, fract(aSeed * 17.0))
+          * 140.0
+          / max(1.0, -mvPosition.z);
       }
     `,
     fragmentShader: `
@@ -917,16 +940,16 @@ export function createSnowParticleMaterial() {
   });
 }
 
-export function createAmbientParticleField(count = 60) {
+export function createAmbientParticleField(count = 250) {
   const geometry = new THREE.BufferGeometry();
   const positions = new Float32Array(count * 3);
   const random = new Float32Array(count * 3);
 
   for (let index = 0; index < count; index += 1) {
     const stride = index * 3;
-    positions[stride] = (Math.random() - 0.5) * 2.5;
-    positions[stride + 1] = (Math.random() - 0.5) * 0.5;
-    positions[stride + 2] = (Math.random() - 0.5) * 2.5;
+    positions[stride] = Math.random() * 4 - 2;
+    positions[stride + 1] = Math.random() * 4 - 2;
+    positions[stride + 2] = (index / count - 0.5) * 2;
     random[stride] = Math.random();
     random[stride + 1] = Math.random();
     random[stride + 2] = Math.random();
@@ -942,27 +965,44 @@ export function createAmbientParticleMaterial() {
     uniforms: {
       uTime: { value: 0 },
       uResolution: { value: new THREE.Vector2(1, 1) },
-      uAlpha: { value: 1 }
+      uAlpha: { value: 1 },
+      uRotation: { value: -0.66 }
     },
     vertexShader: `
       attribute vec3 random;
       uniform float uTime;
       uniform vec2 uResolution;
+      uniform float uRotation;
       varying float vLightFalloff;
+
+      vec2 rotate2(vec2 value, float angle) {
+        float s = sin(angle);
+        float c = cos(angle);
+        return mat2(c, s, -s, c) * value;
+      }
+
       void main() {
         float t = uTime * 0.1;
         vec3 pos = position;
-        pos.x += sin(t * 0.4 + position.z * 2.5) * 0.75;
-        pos.y += sin(t * 0.2 + position.x * 2.5) * 0.75;
-        pos.z += sin(t * 0.2 + position.y * 2.5) * 0.75;
+        pos.x += sin(t * 0.4 + position.y * 2.5);
+        pos.y += sin(t * 0.2 + position.x * 2.5);
 
         vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
         gl_Position = projectionMatrix * mvPosition;
-        gl_PointSize = mix(7.0, 12.0, random.x) * uResolution.y * 0.002;
+        float size = 15.0;
+        size *= mix(0.15, 1.0, pow(random.x, 2.0));
+        gl_PointSize = size * (uResolution.y * 0.002);
 
-        vLightFalloff = sin(uTime * 1.8 + random.y * 22.43) * 0.4 + 0.6;
-        vLightFalloff *= smoothstep(0.2, 0.24, length(pos.xz));
-        vLightFalloff *= 1.25;
+        vec2 ndc = gl_Position.xy / max(gl_Position.w, 0.0001);
+        vec2 uv = ndc;
+        uv.x *= uResolution.x / max(uResolution.y, 1.0);
+        uv *= 0.5;
+        uv += 0.5;
+        uv = rotate2(uv - 0.5, uRotation) + 0.5;
+        vLightFalloff = uv.y * 0.5;
+        vLightFalloff *= sin(uTime * 0.8 + random.y * 12.43) * 0.5 + 0.5;
+        vLightFalloff *= sin(uTime * 1.73 + random.z * 7.16) * 0.5 + 0.5;
+        vLightFalloff *= mix(0.5, 1.0, random.z);
       }
     `,
     fragmentShader: `
