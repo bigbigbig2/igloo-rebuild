@@ -51,7 +51,8 @@ export class UIScene {
       project: () => {},
       entryLinkPreview: () => {},
       entryLinkPreviewClear: () => {},
-      entryLinkOpen: () => {}
+      entryLinkOpen: () => {},
+      entryLinkCycle: () => {}
     };
 
     // 整个 HUD 是纯 DOM 结构，作为 overlay 挂载到外层 UI 容器。
@@ -130,7 +131,8 @@ export class UIScene {
     onProject,
     onEntryLinkPreview,
     onEntryLinkPreviewClear,
-    onEntryLinkOpen
+    onEntryLinkOpen,
+    onEntryLinkCycle
   }) {
     // 主控制器会把真实行为回注到 DOM HUD。
     this.handlers.home = onHome;
@@ -140,6 +142,7 @@ export class UIScene {
     this.handlers.entryLinkPreview = onEntryLinkPreview ?? (() => {});
     this.handlers.entryLinkPreviewClear = onEntryLinkPreviewClear ?? (() => {});
     this.handlers.entryLinkOpen = onEntryLinkOpen ?? (() => {});
+    this.handlers.entryLinkCycle = onEntryLinkCycle ?? (() => {});
   }
 
   bindStaticEvents() {
@@ -177,16 +180,22 @@ export class UIScene {
       <div class="hud__entry">
         <div class="hud__entry-block" data-entry-block="header">
           <p class="hud__eyebrow">Outbound Portals</p>
-          <h2 class="hud__detail-title">Entry Links</h2>
         </div>
-        <p class="hud__detail-copy hud__entry-block" data-entry-block="copy">External links reconstructed from the original site link registry. This stays in the DOM HUD until the WebGL portal UI is migrated.</p>
-        <div class="hud__stack hud__entry-block" data-entry-block="links">
+        <div class="hud__entry-nav hud__entry-block" data-entry-block="links">
+          <button class="hud__entry-arrow hud__entry-arrow--left" type="button" data-entry-cycle="-1" aria-label="Previous entry link">‹</button>
           ${this.content.links.map((link, index) => `
-            <a class="hud__card hud__card--link ${index === 0 ? 'is-active' : ''}" data-entry-link-index="${index}" href="${link.url}" target="_blank" rel="noreferrer">
-              <h3 class="hud__card-title">${link.label}</h3>
-              <p class="hud__card-meta">${link.vdb ?? 'portal'} / scale ${link.scale ?? 1}</p>
+            <a class="hud__entry-link ${index === 0 ? 'is-active' : ''}" data-entry-link-index="${index}" href="${link.url}" target="_blank" rel="noreferrer">
+              <span class="hud__entry-link-frame" aria-hidden="true"></span>
+              <span class="hud__entry-link-label">${link.label}</span>
             </a>
           `).join('')}
+          <button class="hud__entry-arrow hud__entry-arrow--right" type="button" data-entry-cycle="1" aria-label="Next entry link">›</button>
+        </div>
+        <div class="hud__entry-block hud__entry-block--visit" data-entry-block="copy">
+          <a class="hud__entry-visit" data-entry-visit href="${this.content.links[0]?.url ?? '#'}" target="_blank" rel="noreferrer">
+            <span class="hud__entry-visit-frame" aria-hidden="true"></span>
+            <span>Visit</span>
+          </a>
         </div>
       </div>
     `;
@@ -197,6 +206,8 @@ export class UIScene {
       links: this.entryPanel.querySelector('[data-entry-block="links"]')
     };
     this.entryLinkCards = Array.from(this.entryPanel.querySelectorAll('[data-entry-link-index]'));
+    this.entryVisit = this.entryPanel.querySelector('[data-entry-visit]');
+    this.entryCycleButtons = Array.from(this.entryPanel.querySelectorAll('[data-entry-cycle]'));
 
     this.entryLinkCards.forEach((card) => {
       const index = Number(card.dataset.entryLinkIndex ?? 0);
@@ -211,11 +222,23 @@ export class UIScene {
       });
     });
 
-    this.entryBlocks.links?.addEventListener('pointerleave', () => {
+    this.entryCycleButtons.forEach((button) => {
+      const direction = Number(button.dataset.entryCycle ?? 0);
+      button.addEventListener('click', () => {
+        this.handlers.entryLinkCycle(direction);
+      });
+    });
+
+    this.entryVisit?.addEventListener('click', () => {
+      const index = Number(this.entryVisit?.dataset.entryVisitIndex ?? 0);
+      this.handlers.entryLinkOpen(index);
+    });
+
+    this.entryPanel.addEventListener('pointerleave', () => {
       this.handlers.entryLinkPreviewClear();
     });
-    this.entryBlocks.links?.addEventListener('focusout', (event) => {
-      if (!this.entryBlocks.links?.contains(event.relatedTarget)) {
+    this.entryPanel.addEventListener('focusout', (event) => {
+      if (!this.entryPanel.contains(event.relatedTarget)) {
         this.handlers.entryLinkPreviewClear();
       }
     });
@@ -319,12 +342,13 @@ export class UIScene {
     this.sectionTag.style.transform = `translate3d(0, ${(1 - tagReveal) * 8}px, 0)`;
   }
 
-  applyEntryPresentation(entryPresentation = null, route = null, activeSectionKey = null, hasProject = false) {
+  applyEntryPresentation(entryPresentation = null, route = null, activeSectionKey = null, hasProject = false, useWebglUi = false) {
     // 当首页进入 entry section 时，右侧 entry panel 会独立接管侧栏内容区。
     const isEntryActive = route?.name === 'home' && activeSectionKey === 'entry' && !hasProject;
     const panelProgress = isEntryActive ? (entryPresentation?.panelProgress ?? 0) : 0;
     const linksProgress = isEntryActive ? (entryPresentation?.linksProgress ?? 0) : 0;
     const pulse = isEntryActive ? (entryPresentation?.interactionPulse ?? 0) : 0;
+    const useTransparentHitLayer = Boolean(useWebglUi && isEntryActive);
 
     if (!isEntryActive && panelProgress <= 0.001) {
       this.entryPanel.classList.add('is-hidden');
@@ -335,10 +359,10 @@ export class UIScene {
     }
 
     this.entryPanel.classList.remove('is-hidden');
-    this.entryPanel.style.opacity = `${0.08 + panelProgress * 0.92}`;
+    this.entryPanel.style.opacity = useTransparentHitLayer ? '0.001' : `${0.08 + panelProgress * 0.92}`;
     this.entryPanel.style.transform = `translate3d(0, ${(1 - panelProgress) * 18}px, 0) scale(${0.988 + panelProgress * 0.012})`;
     this.entryPanel.style.pointerEvents = isEntryActive && panelProgress > 0.6 ? 'auto' : 'none';
-    this.entryPanel.style.boxShadow = `0 18px 80px rgba(0, 0, 0, ${0.28 + pulse * 0.08})`;
+    this.entryPanel.style.boxShadow = 'none';
 
     const blockConfig = {
       header: { reveal: panelProgress, offset: 14 },
@@ -354,7 +378,7 @@ export class UIScene {
       }
 
       const reveal = clamp(config.reveal, 0, 1);
-      element.style.opacity = `${reveal}`;
+      element.style.opacity = useTransparentHitLayer ? '0.001' : `${reveal}`;
       element.style.transform = `translate3d(0, ${(1 - reveal) * config.offset}px, 0) scale(${0.988 + reveal * 0.012})`;
       element.style.pointerEvents = reveal > 0.72 ? 'auto' : 'none';
     });
@@ -363,9 +387,15 @@ export class UIScene {
     this.entryLinkCards?.forEach((card, index) => {
       const isActive = isEntryActive && index === activeLinkIndex;
       card.classList.toggle('is-active', isActive);
-      card.style.opacity = `${isEntryActive ? (isActive ? 1 : 0.72) : 1}`;
-      card.style.transform = isActive ? 'translate3d(0, -2px, 0) scale(1.01)' : '';
+      card.style.opacity = useTransparentHitLayer ? '0.001' : `${isEntryActive ? (isActive ? 1 : 0.28) : 1}`;
+      card.style.transform = isActive ? 'translate3d(0, -1px, 0)' : '';
     });
+
+    const activeLink = this.content.links?.[activeLinkIndex] ?? null;
+    if (this.entryVisit && activeLink) {
+      this.entryVisit.href = activeLink.url;
+      this.entryVisit.dataset.entryVisitIndex = `${activeLinkIndex}`;
+    }
 
     if (isEntryActive) {
       this.projectList.style.opacity = `${Math.max(0.05, 1 - panelProgress * 1.15)}`;
@@ -518,7 +548,13 @@ export class UIScene {
 
     this.applyManifestoPresentation(state.iglooPresentation, state.route, state.activeSectionKey);
     this.applyDetailPresentation(state.detailUiProgress, Boolean(state.project));
-    this.applyEntryPresentation(state.entryPresentation, state.route, state.activeSectionKey, Boolean(state.project));
+    this.applyEntryPresentation(
+      state.entryPresentation,
+      state.route,
+      state.activeSectionKey,
+      Boolean(state.project),
+      Boolean(state.useWebglUi)
+    );
     this.applyCubesHomePresentation(state.route, state.activeSectionKey, Boolean(state.project));
     this.applyEntryHomePresentation(state.route, state.activeSectionKey, Boolean(state.project));
 

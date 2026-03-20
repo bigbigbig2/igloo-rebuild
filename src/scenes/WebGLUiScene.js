@@ -158,6 +158,32 @@ function createOverlayLine(color = '#ffffff', renderOrder = 1001) {
   return line;
 }
 
+function placeTextBlock(block, x, y, scale = 1, anchor = 'left', vertical = 'top') {
+  if (!block?.mesh) {
+    return;
+  }
+
+  const width = (block.size?.width ?? 0) * scale;
+  const height = (block.size?.height ?? 0) * scale;
+  let targetX = x;
+  let targetY = y;
+
+  if (anchor === 'center') {
+    targetX -= width * 0.5;
+  } else if (anchor === 'right') {
+    targetX -= width;
+  }
+
+  if (vertical === 'center') {
+    targetY += height * 0.5;
+  } else if (vertical === 'bottom') {
+    targetY += height;
+  }
+
+  block.mesh.scale.set(scale, scale, 1);
+  block.mesh.position.set(targetX, targetY, 0);
+}
+
 function setLinePoints(line, points = []) {
   const positions = line.geometry.getAttribute('position');
   const segmentCount = Math.max(points.length - 1, 0);
@@ -277,6 +303,33 @@ function trimPolyline(points = [], progress = 1) {
   return trimmed.length >= 2 ? trimmed : [];
 }
 
+function createRectanglePoints(centerX, centerY, width, height) {
+  const halfWidth = width * 0.5;
+  const halfHeight = height * 0.5;
+  return [
+    new THREE.Vector2(centerX - halfWidth, centerY + halfHeight),
+    new THREE.Vector2(centerX + halfWidth, centerY + halfHeight),
+    new THREE.Vector2(centerX + halfWidth, centerY - halfHeight),
+    new THREE.Vector2(centerX - halfWidth, centerY - halfHeight),
+    new THREE.Vector2(centerX - halfWidth, centerY + halfHeight)
+  ];
+}
+
+function createBracketPoints(centerX, centerY, width, height, side = 'left') {
+  const halfWidth = width * 0.5;
+  const halfHeight = height * 0.5;
+  const direction = side === 'left' ? 1 : -1;
+  const edgeX = centerX + (side === 'left' ? -halfWidth : halfWidth);
+  const inset = Math.max(width * 0.14, 10);
+
+  return [
+    new THREE.Vector2(edgeX + inset * direction, centerY + halfHeight),
+    new THREE.Vector2(edgeX, centerY + halfHeight),
+    new THREE.Vector2(edgeX, centerY - halfHeight),
+    new THREE.Vector2(edgeX + inset * direction, centerY - halfHeight)
+  ];
+}
+
 /**
  * WebGLUiScene 是首页高保真 HUD 的 WebGL 实现。
  *
@@ -324,7 +377,8 @@ export class WebGLUiScene {
       manifestoLabel: 'Manifesto',
       manifestoText: content.manifesto.text ?? '',
       iglooPresentation: null,
-      cubesPresentation: null
+      cubesPresentation: null,
+      entryPresentation: null
     };
 
     // heroGroup 用于承载 logo / manifesto / legal 等首页上层信息。
@@ -332,12 +386,14 @@ export class WebGLUiScene {
     this.legalGroup = new THREE.Group();
     this.manifestoGroup = new THREE.Group();
     this.soundGroup = new THREE.Group();
+    this.entryGroup = new THREE.Group();
     // cubesGroup 独立承载 portfolio section 的 UI 锚点框线与文字。
     this.cubesGroup = new THREE.Group();
 
     this.scene.add(this.heroGroup);
     this.scene.add(this.soundGroup);
     this.scene.add(this.cubesGroup);
+    this.scene.add(this.entryGroup);
     this.heroGroup.add(this.legalGroup);
     this.heroGroup.add(this.manifestoGroup);
 
@@ -362,6 +418,13 @@ export class WebGLUiScene {
       title: createOverlayLine('#ffffff', 1001),
       date: createOverlayLine('#ffffff', 1001)
     };
+    this.entryLines = {
+      cage: createOverlayLine('#d8deea', 1000),
+      arrowLeft: createOverlayLine('#ffffff', 1002),
+      arrowRight: createOverlayLine('#ffffff', 1002),
+      selectionLeft: createOverlayLine('#ffffff', 1003),
+      selectionRight: createOverlayLine('#ffffff', 1003)
+    };
     this.basePositions = {};
     this.cubesOverlay = {
       titleKey: null,
@@ -376,8 +439,37 @@ export class WebGLUiScene {
         temp: false
       }
     };
+    this.entryOverlay = {
+      previousLabel: null,
+      currentLabel: null,
+      nextLabel: null
+    };
 
     this.cubesGroup.add(this.cubesLines.frame, this.cubesLines.title, this.cubesLines.date);
+    this.entryGroup.add(
+      this.entryLines.cage,
+      this.entryLines.arrowLeft,
+      this.entryLines.arrowRight,
+      this.entryLines.selectionLeft,
+      this.entryLines.selectionRight
+    );
+
+    const blocksTexture = this.assets?.get('texture', 'scroll-data') ?? null;
+    this.entryVisitMesh = createSpriteMesh(
+      createLogoMaterial(this.assets?.get('texture', 'ui-visit') ?? null, blocksTexture),
+      1002
+    );
+    this.entryLeftArrow = createSpriteMesh(
+      createLogoMaterial(this.assets?.get('texture', 'ui-arrow') ?? null, blocksTexture),
+      1002
+    );
+    this.entryRightArrow = createSpriteMesh(
+      createLogoMaterial(this.assets?.get('texture', 'ui-arrow') ?? null, blocksTexture),
+      1002
+    );
+    this.entryLeftArrow.scale.x = -1;
+    this.entryGroup.add(this.entryVisitMesh, this.entryLeftArrow, this.entryRightArrow);
+    this.entryGroup.visible = false;
 
     this.ready = this.init().catch((error) => {
       console.warn('WebGL UI failed to initialize, keeping DOM HUD as fallback.', error);
@@ -481,14 +573,52 @@ export class WebGLUiScene {
       align: 'left',
       color: '#ffffff'
     });
+    this.textBlocks.entryPrev = new MsdfTextBlock({
+      fontData: this.fontData,
+      atlasTexture: fontTexture,
+      text: this.content.links?.[0]?.label ?? '',
+      maxWidth: 260,
+      fontSize: 22,
+      lineHeight: 1,
+      align: 'right',
+      color: '#8d96a6'
+    });
+    this.textBlocks.entryCurrent = new MsdfTextBlock({
+      fontData: this.fontData,
+      atlasTexture: fontTexture,
+      text: this.content.links?.[0]?.label ?? '',
+      maxWidth: 260,
+      fontSize: 24,
+      lineHeight: 1,
+      align: 'left',
+      color: '#ffffff'
+    });
+    this.textBlocks.entryNext = new MsdfTextBlock({
+      fontData: this.fontData,
+      atlasTexture: fontTexture,
+      text: this.content.links?.[1]?.label ?? '',
+      maxWidth: 260,
+      fontSize: 22,
+      lineHeight: 1,
+      align: 'left',
+      color: '#8d96a6'
+    });
 
     this.legalGroup.add(this.textBlocks.copyright.mesh, this.textBlocks.rights.mesh);
     this.manifestoGroup.add(this.textBlocks.manifestoLabel.mesh, this.textBlocks.manifestoText.mesh);
     this.soundGroup.add(this.textBlocks.soundLabel.mesh, this.textBlocks.soundValue.mesh);
     this.cubesGroup.add(this.textBlocks.cubeTitle.mesh, this.textBlocks.cubeMeta.mesh, this.textBlocks.cubeTemp.mesh);
+    this.entryGroup.add(
+      this.textBlocks.entryPrev.mesh,
+      this.textBlocks.entryCurrent.mesh,
+      this.textBlocks.entryNext.mesh
+    );
     this.textBlocks.cubeTitle.mesh.renderOrder = 1004;
     this.textBlocks.cubeMeta.mesh.renderOrder = 1004;
     this.textBlocks.cubeTemp.mesh.renderOrder = 1004;
+    this.textBlocks.entryPrev.mesh.renderOrder = 1004;
+    this.textBlocks.entryCurrent.mesh.renderOrder = 1004;
+    this.textBlocks.entryNext.mesh.renderOrder = 1004;
 
     this.readyState = 'ready';
     this.layout();
@@ -551,6 +681,44 @@ export class WebGLUiScene {
     if (nextTemp !== this.cubesOverlay.tempKey) {
       this.cubesOverlay.tempKey = nextTemp;
       this.textBlocks.cubeTemp.setText(nextTemp);
+    }
+  }
+
+  updateEntryOverlayContent() {
+    if (this.readyState !== 'ready') {
+      return;
+    }
+
+    const links = this.content.links ?? [];
+
+    if (!links.length) {
+      return;
+    }
+
+    const activeIndex = clamp(
+      Math.round(this.state.entryPresentation?.activeLinkIndex ?? 0),
+      0,
+      links.length - 1
+    );
+    const previousIndex = (activeIndex - 1 + links.length) % links.length;
+    const nextIndex = (activeIndex + 1) % links.length;
+    const previousLabel = links[previousIndex]?.label ?? '';
+    const currentLabel = links[activeIndex]?.label ?? '';
+    const nextLabel = links[nextIndex]?.label ?? '';
+
+    if (this.entryOverlay.previousLabel !== previousLabel) {
+      this.entryOverlay.previousLabel = previousLabel;
+      this.textBlocks.entryPrev.setText(previousLabel);
+    }
+
+    if (this.entryOverlay.currentLabel !== currentLabel) {
+      this.entryOverlay.currentLabel = currentLabel;
+      this.textBlocks.entryCurrent.setText(currentLabel);
+    }
+
+    if (this.entryOverlay.nextLabel !== nextLabel) {
+      this.entryOverlay.nextLabel = nextLabel;
+      this.textBlocks.entryNext.setText(nextLabel);
     }
   }
 
@@ -767,6 +935,130 @@ export class WebGLUiScene {
     }
   }
 
+  applyEntryPresentation() {
+    if (this.readyState !== 'ready') {
+      return;
+    }
+
+    const presentation = this.state.entryPresentation;
+    const isEntryHome = this.state.routeName === 'home'
+      && this.state.activeSectionKey === 'entry'
+      && !this.state.hasProject;
+    const reveal = isEntryHome ? clamp(presentation?.panelProgress ?? 0, 0, 1) : 0;
+    const linksReveal = isEntryHome ? clamp(presentation?.linksProgress ?? 0, 0, 1) : 0;
+    const interactionPulse = isEntryHome ? clamp(presentation?.interactionPulse ?? 0, 0, 1) : 0;
+    const visible = isEntryHome && Math.max(reveal, linksReveal) > 0.001;
+
+    this.entryGroup.visible = visible;
+
+    if (!visible) {
+      this.entryLines.cage.visible = false;
+      this.entryLines.arrowLeft.visible = false;
+      this.entryLines.arrowRight.visible = false;
+      this.entryLines.selectionLeft.visible = false;
+      this.entryLines.selectionRight.visible = false;
+      this.entryVisitMesh.material.uniforms.uOpacity.value = 0;
+      this.entryLeftArrow.visible = false;
+      this.entryRightArrow.visible = false;
+      this.entryLeftArrow.material.uniforms.uOpacity.value = 0;
+      this.entryRightArrow.material.uniforms.uOpacity.value = 0;
+      this.textBlocks.entryPrev.setOpacity(0);
+      this.textBlocks.entryCurrent.setOpacity(0);
+      this.textBlocks.entryNext.setOpacity(0);
+      return;
+    }
+
+    this.updateEntryOverlayContent();
+
+    const width = this.size.width;
+    const height = this.size.height;
+    const mobile = width < 760 || height < 680;
+    const small = width < 1180 || height < 820;
+    const entryCenterY = mobile ? 8 : small ? 14 : 18;
+    const arrowWidth = (mobile ? 22 : small ? 26 : 30) * this.uiScale;
+    const arrowHeight = arrowWidth * 0.52;
+    const arrowOffset = (mobile ? 170 : small ? 230 : 288) * this.uiScale;
+    const arrowLineLength = (mobile ? 30 : small ? 42 : 56) * this.uiScale;
+    const arrowLineInset = (mobile ? 10 : small ? 12 : 14) * this.uiScale;
+    const arrowTip = (mobile ? 7 : small ? 8 : 9) * this.uiScale;
+    const visitWidth = (mobile ? 138 : small ? 168 : 188) * this.uiScale;
+    const visitHeight = visitWidth / 3.125;
+    const labelCenterY = -height * 0.5 + this.layoutState.bottomMargin + (mobile ? 84 : small ? 92 : 100) * this.uiScale;
+    const labelSpread = (mobile ? 104 : small ? 136 : 176) * this.uiScale;
+    const currentScale = (mobile ? 0.82 : small ? 0.92 : 1) * this.uiScale;
+    const sideScale = currentScale * (mobile ? 0.72 : 0.78);
+    const selectionOpacity = 0.62 + linksReveal * 0.3 + interactionPulse * 0.08;
+    const boxOpacity = 0.58 + linksReveal * 0.22 + interactionPulse * 0.06;
+    const sideOpacity = 0.16 + linksReveal * 0.18;
+    const currentOpacity = 0.78 + linksReveal * 0.22 + interactionPulse * 0.04;
+    const arrowOpacity = 0.3 + linksReveal * 0.34 + interactionPulse * 0.05;
+    const pulse = 1 + Math.sin(this.elapsed * 3.1) * 0.01 + interactionPulse * 0.02;
+    const frameWidth = Math.max(this.textBlocks.entryCurrent.size.width * currentScale + 44 * this.uiScale, 136 * this.uiScale);
+    const frameHeight = Math.max(this.textBlocks.entryCurrent.size.height * currentScale + 16 * this.uiScale, 30 * this.uiScale);
+
+    this.entryVisitMesh.visible = true;
+    this.entryVisitMesh.scale.set(visitWidth * pulse, visitHeight * pulse, 1);
+    this.entryVisitMesh.position.set(0, labelCenterY, 0);
+    this.entryVisitMesh.material.uniforms.uShow.value = linksReveal;
+    this.entryVisitMesh.material.uniforms.uOpacity.value = boxOpacity;
+
+    this.entryLeftArrow.visible = false;
+    this.entryRightArrow.visible = false;
+    this.entryLeftArrow.scale.set(-arrowWidth * pulse, arrowHeight * pulse, 1);
+    this.entryRightArrow.scale.set(arrowWidth * pulse, arrowHeight * pulse, 1);
+    this.entryLeftArrow.position.set(-arrowOffset, entryCenterY, 0);
+    this.entryRightArrow.position.set(arrowOffset, entryCenterY, 0);
+    this.entryLeftArrow.material.uniforms.uShow.value = linksReveal;
+    this.entryRightArrow.material.uniforms.uShow.value = linksReveal;
+    this.entryLeftArrow.material.uniforms.uOpacity.value = 0;
+    this.entryRightArrow.material.uniforms.uOpacity.value = 0;
+
+    this.textBlocks.entryPrev.setColor('#8d96a6');
+    this.textBlocks.entryCurrent.setColor('#ffffff');
+    this.textBlocks.entryNext.setColor('#8d96a6');
+    this.textBlocks.entryPrev.setOpacity(sideOpacity);
+    this.textBlocks.entryCurrent.setOpacity(currentOpacity);
+    this.textBlocks.entryNext.setOpacity(sideOpacity);
+
+    placeTextBlock(this.textBlocks.entryPrev, -labelSpread, labelCenterY, sideScale, 'right', 'center');
+    placeTextBlock(this.textBlocks.entryCurrent, 0, labelCenterY, currentScale, 'center', 'center');
+    placeTextBlock(this.textBlocks.entryNext, labelSpread, labelCenterY, sideScale, 'left', 'center');
+
+    this.entryLines.cage.visible = false;
+
+    setLinePoints(this.entryLines.arrowLeft, [
+      new THREE.Vector2(-arrowOffset - arrowTip, entryCenterY + arrowTip),
+      new THREE.Vector2(-arrowOffset, entryCenterY),
+      new THREE.Vector2(-arrowOffset - arrowTip, entryCenterY - arrowTip),
+      new THREE.Vector2(-arrowOffset, entryCenterY),
+      new THREE.Vector2(-arrowOffset + arrowLineLength + arrowLineInset, entryCenterY)
+    ]);
+    setLinePoints(this.entryLines.arrowRight, [
+      new THREE.Vector2(arrowOffset + arrowTip, entryCenterY + arrowTip),
+      new THREE.Vector2(arrowOffset, entryCenterY),
+      new THREE.Vector2(arrowOffset + arrowTip, entryCenterY - arrowTip),
+      new THREE.Vector2(arrowOffset, entryCenterY),
+      new THREE.Vector2(arrowOffset - arrowLineLength - arrowLineInset, entryCenterY)
+    ]);
+    this.entryLines.arrowLeft.visible = true;
+    this.entryLines.arrowRight.visible = true;
+    this.entryLines.arrowLeft.material.opacity = arrowOpacity * 0.88;
+    this.entryLines.arrowRight.material.opacity = arrowOpacity * 0.88;
+
+    setLinePoints(
+      this.entryLines.selectionLeft,
+      createBracketPoints(0, labelCenterY, frameWidth, frameHeight, 'left')
+    );
+    setLinePoints(
+      this.entryLines.selectionRight,
+      createBracketPoints(0, labelCenterY, frameWidth, frameHeight, 'right')
+    );
+    this.entryLines.selectionLeft.visible = true;
+    this.entryLines.selectionRight.visible = true;
+    this.entryLines.selectionLeft.material.opacity = selectionOpacity;
+    this.entryLines.selectionRight.material.opacity = selectionOpacity;
+  }
+
   layout() {
     // layout 负责把逻辑组件摆放到当前屏幕尺寸下的合理位置。
     // 这里区分了 desktop / small / mobile 三种近似布局档位。
@@ -909,6 +1201,7 @@ export class WebGLUiScene {
     this.soundIcon.material.uniforms.uOpacity.value = showSound ? clamp(0.72 + panelProgress * 0.28, 0, 1) : 0;
     this.soundIcon.material.uniforms.uShow.value = showSound ? clamp(0.72 + panelProgress * 0.28, 0, 1) : 0;
     this.applyCubesPresentation();
+    this.applyEntryPresentation();
   }
 
   animate(delta, elapsed) {
@@ -935,6 +1228,7 @@ export class WebGLUiScene {
     if (this.readyState === 'ready') {
       this.updateCubesOverlayContent();
       this.applyCubesPresentation();
+      this.applyEntryPresentation();
     }
   }
 
@@ -948,6 +1242,16 @@ export class WebGLUiScene {
       line.geometry.dispose();
       line.material.dispose();
     });
+    Object.values(this.entryLines).forEach((line) => {
+      line.geometry.dispose();
+      line.material.dispose();
+    });
+    this.entryVisitMesh.geometry.dispose();
+    this.entryVisitMesh.material.dispose();
+    this.entryLeftArrow.geometry.dispose();
+    this.entryLeftArrow.material.dispose();
+    this.entryRightArrow.geometry.dispose();
+    this.entryRightArrow.material.dispose();
     Object.values(this.textBlocks).forEach((block) => block.dispose());
   }
 }

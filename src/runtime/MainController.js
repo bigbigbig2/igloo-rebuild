@@ -106,7 +106,8 @@ export class MainController {
       onProject: (hash) => this.openProject(hash),
       onEntryLinkPreview: (index) => this.previewEntryLink(index),
       onEntryLinkPreviewClear: () => this.clearEntryLinkPreview(),
-      onEntryLinkOpen: (index) => this.activateEntryLink(index)
+      onEntryLinkOpen: (index) => this.activateEntryLink(index),
+      onEntryLinkCycle: (direction) => this.cycleEntryLink(direction)
     });
 
     // 注册运行时事件：路由变化、每帧 tick、音频状态变化、输入事件等。
@@ -263,6 +264,29 @@ export class MainController {
     }
 
     this.sections.entry?.previewLink?.(index, { burstNoise: 1 });
+    this.audio?.play('ui-long');
+    this.syncUi();
+  }
+
+  cycleEntryLink(direction = 1) {
+    if (!this.isEntryInteractive()) {
+      return;
+    }
+
+    const links = this.sections.entry?.links ?? this.content.links ?? [];
+    if (!links.length) {
+      return;
+    }
+
+    const currentIndex = this.sections.entry?.activeLinkIndex ?? 0;
+    const step = direction < 0 ? -1 : 1;
+    const nextIndex = (currentIndex + step + links.length) % links.length;
+    const changed = this.sections.entry?.previewLink?.(nextIndex, { burstNoise: 1 }) ?? false;
+
+    if (!changed) {
+      return;
+    }
+
     this.audio?.play('ui-long');
     this.syncUi();
   }
@@ -506,6 +530,7 @@ export class MainController {
     const pointer = this.getNormalizedPointer(event);
     this.sections.igloo?.setPointer(pointer);
     this.sections.cubes?.setPointer(pointer);
+    this.sections.entry?.setPointer(pointer);
     const hit = this.pickProjectHitFromEvent(event);
     this.sections.cubes?.setPointerHit(hit);
     this.setHoveredProject(hit?.project ?? null);
@@ -514,6 +539,7 @@ export class MainController {
   onPointerLeave() {
     this.sections.igloo?.setPointer(null);
     this.sections.cubes?.setPointer(null);
+    this.sections.entry?.setPointer(null);
     this.sections.cubes?.setPointerHit(null);
     this.setHoveredProject(null);
   }
@@ -747,6 +773,7 @@ export class MainController {
       hasProject: Boolean(uiState.project),
       iglooPresentation: uiState.iglooPresentation,
       cubesPresentation: uiState.cubesPresentation,
+      entryPresentation: uiState.entryPresentation,
       muted: this.audio?.muted ?? this.content.audio?.muted ?? true,
       brand: this.content.brand,
       copyright: this.content.manifesto.copyright,

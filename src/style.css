@@ -477,7 +477,7 @@ a {
 
 .hud__entry {
   display: grid;
-  gap: 16px;
+  gap: 14px;
 }
 
 .hud__entry-block {
@@ -485,14 +485,122 @@ a {
   will-change: transform, opacity;
 }
 
-.hud__card--link {
-  display: block;
-  text-decoration: none;
-  color: inherit;
+.hud__entry-nav {
+  display: grid;
+  grid-template-columns: 48px repeat(3, minmax(0, 1fr)) 48px;
+  align-items: center;
+  gap: 12px;
 }
 
-.hud__card--link:hover {
+.hud__entry-arrow {
+  pointer-events: auto;
+  border: 0;
+  padding: 0;
+  width: 48px;
+  height: 48px;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(243, 247, 255, 0.86);
+  font-size: 32px;
+  line-height: 1;
+  cursor: pointer;
+  transition: opacity 180ms ease, transform 180ms ease, color 180ms ease;
+}
+
+.hud__entry-arrow:hover {
+  transform: translateY(-1px);
+  color: #ffffff;
+}
+
+.hud__entry-link {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 44px;
+  padding: 10px 8px;
   text-decoration: none;
+  color: rgba(255, 255, 255, 0.4);
+  transition: opacity 220ms ease, color 220ms ease, transform 220ms ease;
+}
+
+.hud__entry-link:hover,
+.hud__entry-link:focus-visible,
+.hud__entry-link.is-active {
+  color: rgba(255, 255, 255, 0.96);
+  text-decoration: none;
+}
+
+.hud__entry-link-frame {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 220ms ease;
+  pointer-events: none;
+}
+
+.hud__entry-link-frame::before,
+.hud__entry-link-frame::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(currentColor, currentColor) left top / 12px 1px no-repeat,
+    linear-gradient(currentColor, currentColor) left top / 1px 12px no-repeat,
+    linear-gradient(currentColor, currentColor) right top / 12px 1px no-repeat,
+    linear-gradient(currentColor, currentColor) right top / 1px 12px no-repeat,
+    linear-gradient(currentColor, currentColor) left bottom / 12px 1px no-repeat,
+    linear-gradient(currentColor, currentColor) left bottom / 1px 12px no-repeat,
+    linear-gradient(currentColor, currentColor) right bottom / 12px 1px no-repeat,
+    linear-gradient(currentColor, currentColor) right bottom / 1px 12px no-repeat;
+}
+
+.hud__entry-link.is-active .hud__entry-link-frame {
+  opacity: 1;
+}
+
+.hud__entry-link-label {
+  position: relative;
+  z-index: 1;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+
+.hud__entry-block--visit {
+  display: grid;
+  justify-items: center;
+}
+
+.hud__entry-visit {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  min-width: 132px;
+  min-height: 40px;
+  padding: 10px 20px;
+  color: rgba(255, 255, 255, 0.92);
+  text-decoration: none;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-size: 11px;
+}
+
+.hud__entry-visit:hover,
+.hud__entry-visit:focus-visible {
+  text-decoration: none;
+}
+
+.hud__entry-visit-frame {
+  position: absolute;
+  inset: 0;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(10px);
+}
+
+.hud__entry-visit span:last-child {
+  position: relative;
+  z-index: 1;
 }
 
 .hud {
@@ -518,6 +626,54 @@ a {
   background: rgba(7, 11, 17, 0.32);
   border-color: rgba(184, 208, 239, 0.1);
   box-shadow: 0 20px 80px rgba(0, 0, 0, 0.18);
+}
+
+.hud[data-section="entry"][data-detail="false"] .hud__panel--entry {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 26px;
+  width: min(760px, calc(100vw - 48px));
+  margin: 0 auto;
+  padding: 0;
+  background: transparent;
+  border-color: transparent;
+  backdrop-filter: none;
+  box-shadow: none;
+}
+
+.hud[data-section="entry"][data-detail="false"] .hud__entry {
+  justify-items: stretch;
+}
+
+.hud[data-section="entry"][data-detail="false"] .hud__entry-block[data-entry-block="header"] {
+  justify-self: center;
+}
+
+.hud[data-section="entry"][data-detail="false"] .hud__entry-block[data-entry-block="header"] .hud__eyebrow {
+  margin: 0;
+  color: rgba(220, 229, 243, 0.52);
+}
+
+.hud[data-section="entry"][data-detail="false"] .hud__entry-nav {
+  gap: clamp(8px, 1.8vw, 18px);
+}
+
+@media (max-width: 820px) {
+  .hud__entry-nav {
+    grid-template-columns: 40px repeat(3, minmax(0, 1fr)) 40px;
+    gap: 8px;
+  }
+
+  .hud__entry-arrow {
+    width: 40px;
+    height: 40px;
+    font-size: 26px;
+  }
+
+  .hud__entry-link-label {
+    font-size: 11px;
+  }
 }
 
 .hud__title {

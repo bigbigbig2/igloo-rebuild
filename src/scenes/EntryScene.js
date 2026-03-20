@@ -38,6 +38,19 @@ export class EntryScene extends SceneBase {
       interactionEnabled: false,
       interactionForce: 0
     };
+    this.pointerNdc = new THREE.Vector2();
+    this.pointerActive = false;
+    this.pointerRaycaster = new THREE.Raycaster();
+    this.pointerPlane = new THREE.Plane();
+    this.pointerPlaneNormal = new THREE.Vector3(0, 0, 1);
+    this.pointerPlanePoint = new THREE.Vector3(0, -9.785, 0);
+    this.pointerIntersection = new THREE.Vector3(0, -9.785, 0);
+    this.pointerLocal = new THREE.Vector3();
+    this.pointerLocalTarget = new THREE.Vector3();
+    this.pointerLocalPrevious = new THREE.Vector3();
+    this.pointerLocalDelta = new THREE.Vector3();
+    this.pointerVelocity = 0;
+    this.pointerInfluence = 0;
     this.postState = {
       ringProximity: 0,
       squareAttr: new THREE.Vector3(0, 0, 1)
@@ -107,6 +120,98 @@ export class EntryScene extends SceneBase {
 
   prepareForRender(renderer) {
     this.particles?.prewarm?.(renderer, this.active ? 10 : 4);
+  }
+
+  setPointer(pointer = null) {
+    if (pointer && Number.isFinite(pointer.x) && Number.isFinite(pointer.y)) {
+      this.pointerNdc.set(pointer.x, pointer.y);
+      this.pointerActive = true;
+      return;
+    }
+
+    this.pointerActive = false;
+  }
+
+  updatePointerInteraction(delta, interactionForce = 0) {
+    const safeDelta = THREE.MathUtils.clamp(delta, 1 / 240, 1 / 20);
+    const particleField = this.particles;
+
+    if (!particleField?.isVolumeParticleField || !particleField.visible || interactionForce <= 0.001) {
+      this.pointerLocalTarget.set(0, 0, 0);
+      this.pointerLocal.lerp(this.pointerLocalTarget, 1 - Math.exp(-safeDelta * 8));
+      this.pointerLocalDelta.set(0, 0, 0);
+      this.pointerVelocity = THREE.MathUtils.lerp(
+        this.pointerVelocity,
+        0,
+        1 - Math.exp(-safeDelta * 8)
+      );
+      this.pointerInfluence = THREE.MathUtils.lerp(
+        this.pointerInfluence,
+        0,
+        1 - Math.exp(-safeDelta * 8)
+      );
+      particleField.setInteraction?.({
+        point: this.pointerLocal,
+        delta: this.pointerLocalDelta,
+        force: this.pointerInfluence
+      });
+      return;
+    }
+
+    this.pointerInfluence = THREE.MathUtils.lerp(
+      this.pointerInfluence,
+      this.pointerActive ? interactionForce : 0,
+      1 - Math.exp(-safeDelta * 10)
+    );
+
+    if (this.pointerActive) {
+      this.pointerRaycaster.setFromCamera(this.pointerNdc, this.camera);
+      this.camera.getWorldDirection(this.pointerPlaneNormal);
+      particleField.getWorldPosition(this.pointerPlanePoint);
+      this.pointerPlane.setFromNormalAndCoplanarPoint(
+        this.pointerPlaneNormal,
+        this.pointerPlanePoint
+      );
+
+      if (!this.pointerRaycaster.ray.intersectPlane(this.pointerPlane, this.pointerIntersection)) {
+        this.pointerIntersection.copy(this.pointerPlanePoint);
+      }
+
+      this.pointerLocalTarget.copy(this.pointerIntersection);
+      particleField.worldToLocal(this.pointerLocalTarget);
+
+      const localLength = this.pointerLocalTarget.length();
+      if (localLength > 0.38) {
+        this.pointerLocalTarget.multiplyScalar(0.38 / localLength);
+      }
+    } else {
+      this.pointerLocalTarget.set(0, 0, 0);
+    }
+
+    this.pointerLocal.lerp(
+      this.pointerLocalTarget,
+      1 - Math.exp(-safeDelta * (this.pointerActive ? 14 : 8))
+    );
+
+    this.pointerLocalDelta.copy(this.pointerLocal).sub(this.pointerLocalPrevious);
+    const velocityTarget = THREE.MathUtils.clamp(
+      (this.pointerLocalDelta.length() / safeDelta) * 0.8,
+      0,
+      1
+    ) * this.pointerInfluence;
+
+    this.pointerVelocity = THREE.MathUtils.lerp(
+      this.pointerVelocity,
+      velocityTarget,
+      1 - Math.exp(-safeDelta * 12)
+    );
+    this.pointerLocalPrevious.copy(this.pointerLocal);
+
+    particleField.setInteraction?.({
+      point: this.pointerLocal,
+      delta: this.pointerLocalDelta,
+      force: this.pointerInfluence
+    });
   }
 
   setActiveLinkIndex(index, { burstNoise = 1 } = {}) {

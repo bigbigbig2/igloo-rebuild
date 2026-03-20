@@ -645,6 +645,8 @@ export function updateEntryScene(scene, delta, elapsed) {
       showNoise: particleShowNoise,
       portalCoreProgress
     });
+
+    scene.updatePointerInteraction?.(delta, linkInteractionForce);
   }
 
   const particleBurstNoise =
@@ -652,7 +654,13 @@ export function updateEntryScene(scene, delta, elapsed) {
     ?? scene.particles?.material?.uniforms?.uShowNoise?.value
     ?? 0;
   const particleMix = scene.particles?.visible
-    ? THREE.MathUtils.clamp(linkInteractionForce * 0.04 + particleBurstNoise * 0.21, 0, 1)
+    ? THREE.MathUtils.clamp(
+      linkInteractionForce * 0.04
+      + scene.pointerVelocity * 0.21
+      + particleBurstNoise * 0.08,
+      0,
+      1
+    )
     : 0;
 
   scene.audioState = {
