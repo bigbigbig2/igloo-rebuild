@@ -2,14 +2,28 @@
 
 This repository is the clean-room reconstruction workspace for the dumped `www.igloo.inc` production build.
 
-## Planning Docs
+## 文档
 
-- `docs/reverse-engineering-roadmap.md`
-  - Reverse-engineering analysis, migration order and reconstruction roadmap.
-- `docs/igloo-rebuild-architecture.md`
-  - Chinese architecture doc for the current rebuild: module boundaries, code organization and runtime principles.
-- `docs/phase-0/README.md`
-  - Phase 0 reverse-engineering dossier and extracted notes.
+旧的阶段计划文档已经移除，当前统一使用一套直接对应现有代码的文档体系。
+
+- `docs/README.md`
+  - 文档索引与推荐阅读顺序。
+- `docs/01-system-overview.md`
+  - 系统总览与模块边界。
+- `docs/02-runtime-flow.md`
+  - 启动流程、滚动流程、路由流程与渲染编排。
+- `docs/03-content-and-assets.md`
+  - 内容模型、资源清单与加载契约。
+- `docs/04-scenes-overview.md`
+  - 顶层 scene 职责划分。
+- `docs/05-entry-scene.md`
+  - `EntryScene` 的详细拆解与迁移形态。
+- `docs/06-ui-and-debug.md`
+  - DOM HUD、WebGL HUD 与调试面板。
+- `docs/07-source-map.md`
+  - `src/` 源码索引。
+- `docs/08-public-assets.md`
+  - `public/` 资源目录、压缩格式与当前静态资源使用关系。
 
 ## Stack
 
@@ -40,6 +54,8 @@ This repository is the clean-room reconstruction workspace for the dumped `www.i
   - Reconstructed content layer.
 - `src/content/assetManifest.js`
   - Original dump asset references, grouped by role.
+- `src/runtime/MainController.js`
+  - Central application orchestrator for scenes, route, scroll, UI, and audio.
 - `public/decoders/`
   - Local Draco and Basis decoders copied from the production dump.
 - `public/reference-assets/`
@@ -65,10 +81,7 @@ The original site was a production bundle with a thin Svelte shell and a large r
 
 This repo starts by rebuilding that runtime shape first, then the real assets and shaders can be migrated into stable modules instead of staying trapped inside a single minified bundle.
 
-## Next Reverse Steps
+## 文档维护规则
 
-1. Extract the real `Be` data block and replace the temporary content model.
-2. Rebuild the original scroll choreography and section cross-fades from the production controller.
-3. Split the DOM HUD into a real WebGL UI scene if visual parity is the goal.
-4. Reintroduce audio routing and ambient layering.
-5. Start replacing the current standard materials with shader-driven materials from the bundle.
+当 `src/` 下新增文件时，同步更新 `docs/07-source-map.md`。
+当运行时边界或模块职责有明显变化时，同步更新 `docs/` 下对应专题文档。
