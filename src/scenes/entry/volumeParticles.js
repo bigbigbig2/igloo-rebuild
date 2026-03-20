@@ -135,6 +135,12 @@ const COMPUTE_FRAGMENT_SHADER = /* glsl */ `
   uniform float uAdditionalNoise;
   uniform float uInteractForce;
   uniform float uInteractRadius;
+  uniform float uSimulationSpeed;
+  uniform float uFlowForceMultiplier;
+  uniform float uOrigForceMultiplier;
+  uniform float uSurfaceForceMultiplier;
+  uniform float uFriction;
+  uniform float uInteractionForceMultiplier;
 
   uniform vec3 uInteractPoint;
   uniform vec3 uInteractDelta;
@@ -188,7 +194,7 @@ const COMPUTE_FRAGMENT_SHADER = /* glsl */ `
     vec4 currentVel = texelFetch(tTexture2, uv, 0);
     vec4 origPos = texelFetch(tOrig, uv, 0);
 
-    float dtRatio = clamp(uDelta * 60.0, 0.35, 2.5);
+    float dtRatio = clamp(uDelta * uSimulationSpeed * 60.0, 0.35, 2.5);
     float seed = origPos.w;
     float additionalNoise = max(uAdditionalNoise, uShowNoise);
 
@@ -207,28 +213,34 @@ const COMPUTE_FRAGMENT_SHADER = /* glsl */ `
     float dist = (volData.a * 2.0 - 1.0) * 2.0;
 
     vec3 flow = pseudoCurl(currentPos.xyz * 7.0 + seed * 13.7, uTime, seed);
-    float flowForce = 0.0002 * (0.7 + 0.3 * hash11(seed * 19.7)) + 0.0004 * additionalNoise;
+    float flowForce = (
+      0.0002 * (0.7 + 0.3 * hash11(seed * 19.7))
+      + 0.0004 * additionalNoise
+    ) * uFlowForceMultiplier;
     currentVel.xyz += flow * flowForce * dtRatio;
 
     vec3 toOrig = origPos.xyz - currentPos.xyz;
-    float origForce = 0.001;
+    float origForce = 0.001 * uOrigForceMultiplier;
     currentVel.xyz += toOrig * origForce * dtRatio;
 
-    float surfaceForce = 0.0015 * (0.7 + 0.3 * hash11(seed * 53.1));
+    float surfaceForce = 0.0015 * (0.7 + 0.3 * hash11(seed * 53.1)) * uSurfaceForceMultiplier;
     float signForce = mix(0.0, -0.3, sign(dist) + 1.0);
     currentVel.xyz += grad * surfaceForce * signForce * dtRatio;
 
     vec3 toInteract = currentPos.xyz - uInteractPoint;
     float interactDistance = length(toInteract);
     if (uInteractForce > 0.001 && interactDistance < uInteractRadius) {
-      float interactMask = smoothstep(uInteractRadius, 0.0, interactDistance) * uInteractForce;
+      float interactMask =
+        smoothstep(uInteractRadius, 0.0, interactDistance)
+        * uInteractForce
+        * uInteractionForceMultiplier;
       vec3 interactDirection = normalize(toInteract + vec3(0.0001));
       vec3 tangent = normalize(cross(vec3(0.0, 1.0, 0.0), interactDirection) + vec3(0.0001));
       vec3 interactImpulse = (uInteractDelta * 0.35 + tangent * length(uInteractDelta) * 0.18);
       currentVel.xyz += interactImpulse * interactMask * dtRatio * 0.35;
     }
 
-    currentVel.xyz *= frictionFPS(0.9, dtRatio);
+    currentVel.xyz *= frictionFPS(uFriction, dtRatio);
     currentPos.xyz += currentVel.xyz * dtRatio;
 
     currentPos.y = clamp(currentPos.y, -0.34, 0.35);
@@ -438,6 +450,15 @@ function buildVolumeShapeTexture(volumeTexture, textureSize, cubeSize, volumeSca
   return createDataTexture(shapeData, textureSize);
 }
 
+const DEFAULT_VOLUME_PARTICLE_DEBUG_SETTINGS = Object.freeze({
+  simulationSpeed: 1,
+  flowForceMultiplier: 1,
+  origForceMultiplier: 1,
+  surfaceForceMultiplier: 1,
+  friction: 0.9,
+  interactionForceMultiplier: 1
+});
+
 export class EntryVolumeParticles extends THREE.Group {
   constructor({
     volumeTextures = [],
@@ -464,6 +485,7 @@ export class EntryVolumeParticles extends THREE.Group {
     this.warmupTarget = 96;
     this.initialized = false;
     this._supportsSimulation = true;
+    this.debugSettings = { ...DEFAULT_VOLUME_PARTICLE_DEBUG_SETTINGS };
 
     this.interactionPoint = new THREE.Vector3();
     this.interactionDelta = new THREE.Vector3();
@@ -559,6 +581,12 @@ export class EntryVolumeParticles extends THREE.Group {
         uAdditionalNoise: sharedAdditionalNoise,
         uInteractForce: { value: 0 },
         uInteractRadius: { value: 0.22 },
+        uSimulationSpeed: { value: this.debugSettings.simulationSpeed },
+        uFlowForceMultiplier: { value: this.debugSettings.flowForceMultiplier },
+        uOrigForceMultiplier: { value: this.debugSettings.origForceMultiplier },
+        uSurfaceForceMultiplier: { value: this.debugSettings.surfaceForceMultiplier },
+        uFriction: { value: this.debugSettings.friction },
+        uInteractionForceMultiplier: { value: this.debugSettings.interactionForceMultiplier },
         uInteractPoint: { value: this.interactionPoint.clone() },
         uInteractDelta: { value: this.interactionDelta.clone() },
         uLightPos: sharedLightPos
@@ -567,6 +595,39 @@ export class EntryVolumeParticles extends THREE.Group {
       fragmentShader: COMPUTE_FRAGMENT_SHADER,
       depthTest: false,
       depthWrite: false
+    });
+  }
+
+  getDebugSettings() {
+    return { ...this.debugSettings };
+  }
+
+  setDebugSetting(key, value) {
+    if (!(key in this.debugSettings) || !Number.isFinite(value)) {
+      return;
+    }
+
+    this.debugSettings[key] = value;
+
+    const uniformMap = {
+      simulationSpeed: 'uSimulationSpeed',
+      flowForceMultiplier: 'uFlowForceMultiplier',
+      origForceMultiplier: 'uOrigForceMultiplier',
+      surfaceForceMultiplier: 'uSurfaceForceMultiplier',
+      friction: 'uFriction',
+      interactionForceMultiplier: 'uInteractionForceMultiplier'
+    };
+
+    const uniformName = uniformMap[key];
+    if (uniformName && this.computationMaterial?.uniforms?.[uniformName]) {
+      this.computationMaterial.uniforms[uniformName].value = value;
+    }
+  }
+
+  resetDebugSettings() {
+    this.debugSettings = { ...DEFAULT_VOLUME_PARTICLE_DEBUG_SETTINGS };
+    Object.entries(this.debugSettings).forEach(([key, value]) => {
+      this.setDebugSetting(key, value);
     });
   }
 

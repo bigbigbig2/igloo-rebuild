@@ -5,7 +5,9 @@ export class AudioDebugGui {
     this.controller = controller;
     this.iglooScene = controller?.sections?.igloo ?? null;
     this.cubesScene = controller?.sections?.cubes ?? null;
+    this.entryScene = controller?.sections?.entry ?? null;
     this.homeRenderer = controller?.homeRenderer ?? null;
+    this.webglUi = controller?.webglUi ?? null;
     this.controllers = [];
 
     if (!this.iglooScene) {
@@ -15,6 +17,8 @@ export class AudioDebugGui {
     const iglooDebugValues = this.iglooScene?.getIntroDebugSettings?.() ?? {};
     const cubesDebugValues = this.cubesScene?.getLookDebugSettings?.() ?? {};
     const cubesLabelDebugValues = this.cubesScene?.getLabelDebugSettings?.() ?? {};
+    const entryDebugValues = this.entryScene?.getEntryDebugSettings?.() ?? {};
+    const entryHudDebugValues = this.webglUi?.getEntryDebugSettings?.() ?? {};
     const transitionDebugValues =
       this.homeRenderer?.getTransitionDebugSettings?.() ?? {};
 
@@ -41,6 +45,27 @@ export class AudioDebugGui {
       cubesBlurryTextAlpha: cubesDebugValues.blurryTextOpacityScale ?? 0.22,
       cubesSmokeAlpha: cubesDebugValues.smokeOpacityScale ?? 0.85,
       cubesLabelsScale: cubesLabelDebugValues.textScaleMultiplier ?? 0.5,
+      entryParticleSize: entryDebugValues.particleSizeMultiplier ?? 1,
+      entryParticleAlpha: entryDebugValues.particleAlphaMultiplier ?? 1,
+      entryParticleSpin: entryDebugValues.particleRotationSpeed ?? 1,
+      entryParticleNoise: entryDebugValues.particleNoiseMultiplier ?? 1,
+      entryParticleGlow: entryDebugValues.particleInitialGlowMultiplier ?? 1,
+      entryParticleSimSpeed: entryDebugValues.particleSimulationSpeed ?? 1,
+      entryParticleFlow: entryDebugValues.particleFlowForceMultiplier ?? 1,
+      entryParticleOrig: entryDebugValues.particleOrigForceMultiplier ?? 1,
+      entryParticleSurface: entryDebugValues.particleSurfaceForceMultiplier ?? 1,
+      entryParticleFriction: entryDebugValues.particleFriction ?? 0.9,
+      entryParticleInteraction: entryDebugValues.particleInteractionForceMultiplier ?? 1,
+      entryCylinderAlpha: entryDebugValues.cylinderShellAlphaMultiplier ?? 1,
+      entryFloorPhaseSpeed: entryDebugValues.floorPhaseSpeed ?? 1,
+      entryLabelYOffset: entryHudDebugValues.labelYOffset ?? 24,
+      entryLabelTextLift: entryHudDebugValues.labelTextLift ?? 6,
+      entryLabelSpread: entryHudDebugValues.labelSpreadMultiplier ?? 1,
+      entryCurrentLabelScale: entryHudDebugValues.currentScaleMultiplier ?? 1.08,
+      entryCurrentLabelOpacity: entryHudDebugValues.currentOpacityMultiplier ?? 1.18,
+      entrySideLabelOpacity: entryHudDebugValues.sideOpacityMultiplier ?? 2.3,
+      entryVisitYOffset: entryHudDebugValues.visitYOffset ?? -46,
+      entryVisitOpacity: entryHudDebugValues.visitOpacityMultiplier ?? 0.35,
       homeChromaticStrength:
         transitionDebugValues.homeChromaticStrength ?? 0.58,
       homeEdgeSoftness: transitionDebugValues.homeEdgeSoftness ?? 1
@@ -65,6 +90,13 @@ export class AudioDebugGui {
         this.syncValuesFromCubesScene();
         this.refresh();
       },
+      resetEntryDebug: () => {
+        this.entryScene?.resetEntryDebugSettings?.();
+        this.webglUi?.resetEntryDebugSettings?.();
+        this.syncValuesFromEntryScene();
+        this.syncValuesFromWebglUi();
+        this.refresh();
+      },
       resetTransitionFx: () => {
         this.homeRenderer?.resetTransitionDebugSettings?.();
         this.syncValuesFromHomeRenderer();
@@ -83,10 +115,13 @@ export class AudioDebugGui {
     this.buildIglooIntroFolder();
     this.buildCubesLookFolder();
     this.buildCubesLabelsFolder();
+    this.buildEntryFolder();
     this.buildTransitionFolder();
 
     this.syncValuesFromIglooScene();
     this.syncValuesFromCubesScene();
+    this.syncValuesFromEntryScene();
+    this.syncValuesFromWebglUi();
     this.syncValuesFromHomeRenderer();
     this.refresh();
   }
@@ -220,6 +255,78 @@ export class AudioDebugGui {
     this.addController(folder, this.actions, 'resetCubesLabels').name('Reset labels debug');
   }
 
+  buildEntryFolder() {
+    if (!this.entryScene && !this.webglUi) {
+      return;
+    }
+
+    const folder = this.gui.addFolder('Entry Scene');
+    this.addController(folder, this.values, 'entryParticleSize', 0.25, 2.5, 0.01).name('Particle size').onChange((value) => {
+      this.entryScene?.setEntryDebugSetting?.('particleSizeMultiplier', value);
+    });
+    this.addController(folder, this.values, 'entryParticleAlpha', 0, 2, 0.01).name('Particle alpha').onChange((value) => {
+      this.entryScene?.setEntryDebugSetting?.('particleAlphaMultiplier', value);
+    });
+    this.addController(folder, this.values, 'entryParticleSpin', 0, 3, 0.01).name('Particle spin').onChange((value) => {
+      this.entryScene?.setEntryDebugSetting?.('particleRotationSpeed', value);
+    });
+    this.addController(folder, this.values, 'entryParticleNoise', 0, 2.5, 0.01).name('Noise').onChange((value) => {
+      this.entryScene?.setEntryDebugSetting?.('particleNoiseMultiplier', value);
+    });
+    this.addController(folder, this.values, 'entryParticleGlow', 0, 2.5, 0.01).name('Initial glow').onChange((value) => {
+      this.entryScene?.setEntryDebugSetting?.('particleInitialGlowMultiplier', value);
+    });
+    this.addController(folder, this.values, 'entryParticleSimSpeed', 0.2, 2.5, 0.01).name('Sim speed').onChange((value) => {
+      this.entryScene?.setEntryDebugSetting?.('particleSimulationSpeed', value);
+    });
+    this.addController(folder, this.values, 'entryParticleFlow', 0, 3, 0.01).name('Flow force').onChange((value) => {
+      this.entryScene?.setEntryDebugSetting?.('particleFlowForceMultiplier', value);
+    });
+    this.addController(folder, this.values, 'entryParticleOrig', 0, 3, 0.01).name('Orig force').onChange((value) => {
+      this.entryScene?.setEntryDebugSetting?.('particleOrigForceMultiplier', value);
+    });
+    this.addController(folder, this.values, 'entryParticleSurface', 0, 3, 0.01).name('Surface force').onChange((value) => {
+      this.entryScene?.setEntryDebugSetting?.('particleSurfaceForceMultiplier', value);
+    });
+    this.addController(folder, this.values, 'entryParticleFriction', 0.6, 0.999, 0.001).name('Friction').onChange((value) => {
+      this.entryScene?.setEntryDebugSetting?.('particleFriction', value);
+    });
+    this.addController(folder, this.values, 'entryParticleInteraction', 0, 2.5, 0.01).name('Interact force').onChange((value) => {
+      this.entryScene?.setEntryDebugSetting?.('particleInteractionForceMultiplier', value);
+    });
+    this.addController(folder, this.values, 'entryCylinderAlpha', 0, 2, 0.01).name('Cylinder alpha').onChange((value) => {
+      this.entryScene?.setEntryDebugSetting?.('cylinderShellAlphaMultiplier', value);
+    });
+    this.addController(folder, this.values, 'entryFloorPhaseSpeed', 0, 3, 0.01).name('Floor phase').onChange((value) => {
+      this.entryScene?.setEntryDebugSetting?.('floorPhaseSpeed', value);
+    });
+    this.addController(folder, this.values, 'entryLabelYOffset', -20, 80, 1).name('Label Y').onChange((value) => {
+      this.webglUi?.setEntryDebugSetting?.('labelYOffset', value);
+    });
+    this.addController(folder, this.values, 'entryLabelTextLift', -24, 40, 1).name('Text lift').onChange((value) => {
+      this.webglUi?.setEntryDebugSetting?.('labelTextLift', value);
+    });
+    this.addController(folder, this.values, 'entryLabelSpread', 0.6, 1.8, 0.01).name('Label spread').onChange((value) => {
+      this.webglUi?.setEntryDebugSetting?.('labelSpreadMultiplier', value);
+    });
+    this.addController(folder, this.values, 'entryCurrentLabelScale', 0.6, 1.8, 0.01).name('Current scale').onChange((value) => {
+      this.webglUi?.setEntryDebugSetting?.('currentScaleMultiplier', value);
+    });
+    this.addController(folder, this.values, 'entryCurrentLabelOpacity', 0, 2, 0.01).name('Current opacity').onChange((value) => {
+      this.webglUi?.setEntryDebugSetting?.('currentOpacityMultiplier', value);
+    });
+    this.addController(folder, this.values, 'entrySideLabelOpacity', 0, 3, 0.01).name('Side opacity').onChange((value) => {
+      this.webglUi?.setEntryDebugSetting?.('sideOpacityMultiplier', value);
+    });
+    this.addController(folder, this.values, 'entryVisitYOffset', -140, 20, 1).name('Visit Y').onChange((value) => {
+      this.webglUi?.setEntryDebugSetting?.('visitYOffset', value);
+    });
+    this.addController(folder, this.values, 'entryVisitOpacity', 0, 1.5, 0.01).name('Visit opacity').onChange((value) => {
+      this.webglUi?.setEntryDebugSetting?.('visitOpacityMultiplier', value);
+    });
+    this.addController(folder, this.actions, 'resetEntryDebug').name('Reset entry debug');
+  }
+
   syncValuesFromIglooScene() {
     const settings = this.iglooScene?.getIntroDebugSettings?.();
 
@@ -272,6 +379,45 @@ export class AudioDebugGui {
 
     this.values.homeChromaticStrength = settings.homeChromaticStrength;
     this.values.homeEdgeSoftness = settings.homeEdgeSoftness;
+  }
+
+  syncValuesFromEntryScene() {
+    const settings = this.entryScene?.getEntryDebugSettings?.();
+
+    if (!settings) {
+      return;
+    }
+
+    this.values.entryParticleSize = settings.particleSizeMultiplier;
+    this.values.entryParticleAlpha = settings.particleAlphaMultiplier;
+    this.values.entryParticleSpin = settings.particleRotationSpeed;
+    this.values.entryParticleNoise = settings.particleNoiseMultiplier;
+    this.values.entryParticleGlow = settings.particleInitialGlowMultiplier;
+    this.values.entryParticleSimSpeed = settings.particleSimulationSpeed;
+    this.values.entryParticleFlow = settings.particleFlowForceMultiplier;
+    this.values.entryParticleOrig = settings.particleOrigForceMultiplier;
+    this.values.entryParticleSurface = settings.particleSurfaceForceMultiplier;
+    this.values.entryParticleFriction = settings.particleFriction;
+    this.values.entryParticleInteraction = settings.particleInteractionForceMultiplier;
+    this.values.entryCylinderAlpha = settings.cylinderShellAlphaMultiplier;
+    this.values.entryFloorPhaseSpeed = settings.floorPhaseSpeed;
+  }
+
+  syncValuesFromWebglUi() {
+    const settings = this.webglUi?.getEntryDebugSettings?.();
+
+    if (!settings) {
+      return;
+    }
+
+    this.values.entryLabelYOffset = settings.labelYOffset;
+    this.values.entryLabelTextLift = settings.labelTextLift;
+    this.values.entryLabelSpread = settings.labelSpreadMultiplier;
+    this.values.entryCurrentLabelScale = settings.currentScaleMultiplier;
+    this.values.entryCurrentLabelOpacity = settings.currentOpacityMultiplier;
+    this.values.entrySideLabelOpacity = settings.sideOpacityMultiplier;
+    this.values.entryVisitYOffset = settings.visitYOffset;
+    this.values.entryVisitOpacity = settings.visitOpacityMultiplier;
   }
 
   refresh() {

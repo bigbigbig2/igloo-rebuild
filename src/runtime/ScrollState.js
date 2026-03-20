@@ -4,37 +4,86 @@ function easeOutCubic(value) {
   return 1 - Math.pow(1 - value, 3);
 }
 
+function positiveModulo(value, mod) {
+  return ((value % mod) + mod) % mod;
+}
+
 /**
  * ScrollState 维护首页滚动的 current / target / velocity，
  * 同时支持普通 smooth scroll 和“自动居中吸附”的两段式动画。
  */
 export class ScrollState {
-  constructor({ min = 0, max = 0, damping = 7.5 } = {}) {
+  constructor({ min = 0, max = 0, damping = 7.5, wrap = false } = {}) {
     this.min = min;
     this.max = max;
     this.damping = damping;
-    this.current = clamp(min, min, max);
-    this.target = clamp(min, min, max);
+    this.wrap = wrap;
+    this.current = wrap ? min : clamp(min, min, max);
+    this.target = wrap ? min : clamp(min, min, max);
     this.velocity = 0;
     this.animation = null;
+  }
+
+  getSpan() {
+    return Math.max(this.max - this.min, 0);
+  }
+
+  normalize(value) {
+    if (!this.wrap) {
+      return clamp(value, this.min, this.max);
+    }
+
+    const span = this.getSpan();
+    if (span <= 1e-6) {
+      return this.min;
+    }
+
+    return this.min + positiveModulo(value - this.min, span);
+  }
+
+  resolveTarget(value, origin = this.current) {
+    if (!this.wrap) {
+      return clamp(value, this.min, this.max);
+    }
+
+    const span = this.getSpan();
+    if (span <= 1e-6) {
+      return this.min;
+    }
+
+    const normalized = this.normalize(value);
+    const cycle = Math.round((origin - normalized) / span);
+    return normalized + cycle * span;
   }
 
   setBounds(min, max) {
     this.min = min;
     this.max = max;
-    this.current = clamp(this.current, min, max);
-    this.target = clamp(this.target, min, max);
+
+    if (this.wrap) {
+      this.current = this.resolveTarget(this.current, this.current);
+      this.target = this.resolveTarget(this.target, this.current);
+    } else {
+      this.current = clamp(this.current, min, max);
+      this.target = clamp(this.target, min, max);
+    }
 
     if (this.animation) {
-      this.animation.start = clamp(this.animation.start, min, max);
-      this.animation.overshoot = clamp(this.animation.overshoot, min, max);
-      this.animation.final = clamp(this.animation.final, min, max);
+      if (this.wrap) {
+        this.animation.start = this.resolveTarget(this.animation.start, this.current);
+        this.animation.overshoot = this.resolveTarget(this.animation.overshoot, this.animation.start);
+        this.animation.final = this.resolveTarget(this.animation.final, this.animation.overshoot);
+      } else {
+        this.animation.start = clamp(this.animation.start, min, max);
+        this.animation.overshoot = clamp(this.animation.overshoot, min, max);
+        this.animation.final = clamp(this.animation.final, min, max);
+      }
     }
   }
 
   setTarget(value) {
     this.animation = null;
-    this.target = clamp(value, this.min, this.max);
+    this.target = this.resolveTarget(value, this.target);
     return this.target;
   }
 
@@ -43,7 +92,7 @@ export class ScrollState {
   }
 
   jumpTo(value) {
-    const next = clamp(value, this.min, this.max);
+    const next = this.resolveTarget(value, this.current);
     this.current = next;
     this.target = next;
     this.velocity = 0;
@@ -52,7 +101,7 @@ export class ScrollState {
   }
 
   animateTo(value, duration = 1.6, { overshootScale = 0.16, overshootMax = 0.18 } = {}) {
-    const finalTarget = clamp(value, this.min, this.max);
+    const finalTarget = this.resolveTarget(value, this.current);
     const distance = finalTarget - this.current;
 
     if (Math.abs(distance) <= 1e-6 || duration <= 1e-6) {
@@ -60,11 +109,13 @@ export class ScrollState {
     }
 
     const overshootDistance = Math.min(Math.abs(distance) * overshootScale, overshootMax);
-    const overshootTarget = clamp(
-      finalTarget + Math.sign(distance || 1) * overshootDistance,
-      this.min,
-      this.max
-    );
+    const overshootTarget = this.wrap
+      ? finalTarget + Math.sign(distance || 1) * overshootDistance
+      : clamp(
+        finalTarget + Math.sign(distance || 1) * overshootDistance,
+        this.min,
+        this.max
+      );
 
     this.target = finalTarget;
     this.animation = {
@@ -129,6 +180,7 @@ export class ScrollState {
       velocity: this.velocity,
       min: this.min,
       max: this.max,
+      wrap: this.wrap,
       animating: this.isAnimating()
     };
   }

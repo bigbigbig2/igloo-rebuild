@@ -517,9 +517,13 @@ a {
   display: grid;
   place-items: center;
   min-height: 44px;
+  border: 0;
+  background: transparent;
+  font: inherit;
   padding: 10px 8px;
   text-decoration: none;
   color: rgba(255, 255, 255, 0.4);
+  cursor: pointer;
   transition: opacity 220ms ease, color 220ms ease, transform 220ms ease;
 }
 

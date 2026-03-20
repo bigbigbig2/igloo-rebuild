@@ -51,7 +51,8 @@ export class UIScene {
       project: () => {},
       entryLinkPreview: () => {},
       entryLinkPreviewClear: () => {},
-      entryLinkOpen: () => {},
+      entryLinkSelect: () => {},
+      entryLinkVisit: () => {},
       entryLinkCycle: () => {}
     };
 
@@ -131,7 +132,8 @@ export class UIScene {
     onProject,
     onEntryLinkPreview,
     onEntryLinkPreviewClear,
-    onEntryLinkOpen,
+    onEntryLinkSelect,
+    onEntryLinkVisit,
     onEntryLinkCycle
   }) {
     // 主控制器会把真实行为回注到 DOM HUD。
@@ -141,7 +143,8 @@ export class UIScene {
     this.handlers.project = onProject;
     this.handlers.entryLinkPreview = onEntryLinkPreview ?? (() => {});
     this.handlers.entryLinkPreviewClear = onEntryLinkPreviewClear ?? (() => {});
-    this.handlers.entryLinkOpen = onEntryLinkOpen ?? (() => {});
+    this.handlers.entryLinkSelect = onEntryLinkSelect ?? (() => {});
+    this.handlers.entryLinkVisit = onEntryLinkVisit ?? (() => {});
     this.handlers.entryLinkCycle = onEntryLinkCycle ?? (() => {});
   }
 
@@ -184,10 +187,10 @@ export class UIScene {
         <div class="hud__entry-nav hud__entry-block" data-entry-block="links">
           <button class="hud__entry-arrow hud__entry-arrow--left" type="button" data-entry-cycle="-1" aria-label="Previous entry link">‹</button>
           ${this.content.links.map((link, index) => `
-            <a class="hud__entry-link ${index === 0 ? 'is-active' : ''}" data-entry-link-index="${index}" href="${link.url}" target="_blank" rel="noreferrer">
+            <button class="hud__entry-link ${index === 0 ? 'is-active' : ''}" data-entry-link-index="${index}" type="button">
               <span class="hud__entry-link-frame" aria-hidden="true"></span>
               <span class="hud__entry-link-label">${link.label}</span>
-            </a>
+            </button>
           `).join('')}
           <button class="hud__entry-arrow hud__entry-arrow--right" type="button" data-entry-cycle="1" aria-label="Next entry link">›</button>
         </div>
@@ -218,7 +221,7 @@ export class UIScene {
         this.handlers.entryLinkPreview(index);
       });
       card.addEventListener('click', () => {
-        this.handlers.entryLinkOpen(index);
+        this.handlers.entryLinkSelect(index);
       });
     });
 
@@ -231,7 +234,7 @@ export class UIScene {
 
     this.entryVisit?.addEventListener('click', () => {
       const index = Number(this.entryVisit?.dataset.entryVisitIndex ?? 0);
-      this.handlers.entryLinkOpen(index);
+      this.handlers.entryLinkVisit(index);
     });
 
     this.entryPanel.addEventListener('pointerleave', () => {

@@ -195,9 +195,6 @@ const PLASMA_WINDOWS = [
 
 const RING_ENDS = [0.34, 0.43, 0.52];
 const SMOKE_ENDS = [0.37, 0.47, 0.56];
-const LINK_SWITCH_START = 0.64;
-const LINK_SWITCH_END = 0.9;
-
 function powerExponent(level) {
   return level + 1;
 }
@@ -327,23 +324,6 @@ function fadeWindow(progress, start, end, fadeIn = 0.04, fadeOut = 0.08) {
   return visibleIn * visibleOut;
 }
 
-function computeAutoLinkIndex(progress, count) {
-  if (!count || count <= 1) {
-    return 0;
-  }
-
-  if (progress <= LINK_SWITCH_START) {
-    return 0;
-  }
-
-  if (progress >= LINK_SWITCH_END) {
-    return count - 1;
-  }
-
-  const localProgress = clamp01((progress - LINK_SWITCH_START) / Math.max(LINK_SWITCH_END - LINK_SWITCH_START, 1e-6));
-  return Math.min(count - 1, Math.floor(localProgress * count));
-}
-
 function computeLinkInteractionForce(progress) {
   const fadeIn = THREE.MathUtils.smoothstep(progress, 0.45, 0.65);
   const fadeOut = 1 - THREE.MathUtils.smoothstep(progress, 0.8, 0.93);
@@ -422,6 +402,14 @@ export function computePresentationState(progress = 0, enterProgress = 1) {
 }
 
 export function updateEntryScene(scene, delta, elapsed) {
+  const debug = scene.entryDebugSettings ?? {};
+  const particleSizeMultiplier = debug.particleSizeMultiplier ?? 1;
+  const particleAlphaMultiplier = debug.particleAlphaMultiplier ?? 1;
+  const particleRotationSpeed = debug.particleRotationSpeed ?? 1;
+  const particleNoiseMultiplier = debug.particleNoiseMultiplier ?? 1;
+  const particleInitialGlowMultiplier = debug.particleInitialGlowMultiplier ?? 1;
+  const cylinderShellAlphaMultiplier = debug.cylinderShellAlphaMultiplier ?? 1;
+  const floorPhaseSpeed = debug.floorPhaseSpeed ?? 1;
   const isIncomingFromCubes =
     scene.transitionState?.role === 'next' && scene.transitionState?.previousKey === 'cubes';
   const enterProgress = isIncomingFromCubes
@@ -475,17 +463,17 @@ export function updateEntryScene(scene, delta, elapsed) {
   const groundSmokeReveal = sampleTrack(ROOM_TRACKS.groundSmokeAlpha, timePosition);
   const ceilingSmokeReveal = smoothWindow(timePosition, 4.5, 5.1);
   const ambientReveal = sampleTrack(ROOM_TRACKS.ambientAlpha, timePosition);
+  const cylinderShellReveal =
+    smoothWindow(progress, 0.56, 0.74)
+    * (1 - smoothWindow(progress, 0.94, 1))
+    * THREE.MathUtils.lerp(0.75, 1, roomRingReveal);
   const particleReveal = sampleTrack(ROOM_TRACKS.particleAlpha, timePosition);
   const particleInitialGlow = sampleTrack(ROOM_TRACKS.particleInitialGlow, timePosition);
   const particleShowNoise = sampleTrack(ROOM_TRACKS.particleShowNoise, timePosition);
-  const autoLinkIndex = computeAutoLinkIndex(progress, scene.links?.length ?? 0);
-  const linkInteractionEnabled = progress > LINK_SWITCH_START && progress < LINK_SWITCH_END;
+  const linkInteractionEnabled = progress > 0.64 && progress < 0.9;
   const linkInteractionForce = computeLinkInteractionForce(progress);
 
   scene.setLinkInteractionEnabled?.(linkInteractionEnabled);
-  scene.setAutoLinkIndex?.(autoLinkIndex, {
-    burstNoise: progress > LINK_SWITCH_START ? 0.85 : 0.4
-  });
   scene.presentationState.activeLinkIndex = scene.activeLinkIndex;
   scene.presentationState.activeLink = scene.links?.[scene.activeLinkIndex] ?? null;
   scene.presentationState.interactionEnabled = scene.linkInteractionEnabled;
@@ -542,9 +530,16 @@ export function updateEntryScene(scene, delta, elapsed) {
   }
 
   if (scene.floor) {
+    scene.floorAdditionalTime = THREE.MathUtils.damp(
+      scene.floorAdditionalTime ?? 0,
+      scene.floorAdditionalTimeTarget ?? 0,
+      1.6,
+      delta
+    );
     scene.floor.visible = timePosition >= 3.4 || floorReveal > 0.001;
     scene.floor.material.uniforms.uTime.value = elapsed;
-    scene.floor.material.uniforms.uRotationTime.value = elapsed * 0.5;
+    scene.floor.material.uniforms.uRotationTime.value =
+      elapsed * 0.5 * floorPhaseSpeed + scene.floorAdditionalTime;
     scene.floor.material.uniforms.uAlpha.value = floorReveal;
   }
 
@@ -571,12 +566,18 @@ export function updateEntryScene(scene, delta, elapsed) {
   }
 
   if (scene.textCylinder3) {
+    scene.textCylinder3.visible = cylinderShellReveal > 0.001;
     scene.textCylinder3.material.uniforms.uTime.value = elapsed;
+    scene.textCylinder3.material.uniforms.uAlpha.value =
+      cylinderShellReveal * 0.92 * cylinderShellAlphaMultiplier;
     scene.textCylinder3.rotation.y = upRotation * 0.65 + 2;
   }
 
   if (scene.textCylinder4) {
+    scene.textCylinder4.visible = cylinderShellReveal > 0.001;
     scene.textCylinder4.material.uniforms.uTime.value = elapsed;
+    scene.textCylinder4.material.uniforms.uAlpha.value =
+      cylinderShellReveal * 0.72 * cylinderShellAlphaMultiplier;
     scene.textCylinder4.rotation.y = upRotation * 0.65;
   }
 
@@ -602,19 +603,37 @@ export function updateEntryScene(scene, delta, elapsed) {
     scene.particles.visible = timePosition >= 1.5 || particleReveal > 0.001;
     scene.particles.position.y = -9.785 + Math.sin(elapsed * 0.32) * 0.025 * particleReveal;
     if (scene.particles.isVolumeParticleField) {
-      scene.particles.rotation.set(0, 0, 0);
-      scene.particles.scale.setScalar(1);
+      scene.particles.rotation.y =
+        elapsed * 0.16 * particleRotationSpeed
+        + Math.sin(elapsed * 0.18 * particleRotationSpeed) * 0.04;
+      scene.particles.rotation.x = Math.sin(elapsed * 0.23 * particleRotationSpeed) * 0.045;
+      scene.particles.rotation.z = Math.sin(elapsed * 0.17 * particleRotationSpeed) * 0.02;
+      scene.particles.scale.setScalar(THREE.MathUtils.lerp(0.985, 1.02, particleReveal));
     } else {
-      scene.particles.rotation.y -= delta * (0.08 + portalCoreProgress * 0.08);
-      scene.particles.rotation.x = Math.sin(elapsed * 0.25) * 0.06;
+      scene.particles.rotation.y -= delta * particleRotationSpeed * (0.08 + portalCoreProgress * 0.08);
+      scene.particles.rotation.x = Math.sin(elapsed * 0.25 * particleRotationSpeed) * 0.06;
       scene.particles.scale.setScalar(THREE.MathUtils.lerp(0.9, 1.08, particleReveal) * (1 + portalCoreProgress * 0.05));
     }
     const particleSize = THREE.MathUtils.lerp(
       0.048,
       0.082,
       clamp01(particleReveal * 0.9 + portalCoreProgress * 0.25)
+    ) * particleSizeMultiplier;
+    const particleAlpha = THREE.MathUtils.clamp(
+      particleReveal * (0.92 + interactionPulse * 0.08) * particleAlphaMultiplier,
+      0,
+      1
     );
-    const particleAlpha = particleReveal * (0.92 + interactionPulse * 0.08);
+    const particleShowNoiseClamped = THREE.MathUtils.clamp(
+      particleShowNoise * particleNoiseMultiplier,
+      0,
+      1
+    );
+    const particleInitialGlowClamped = THREE.MathUtils.clamp(
+      particleInitialGlow * particleInitialGlowMultiplier,
+      0,
+      1
+    );
     const particleMaterial = scene.particles.material;
 
     if (particleMaterial?.uniforms?.uTime) {
@@ -630,10 +649,10 @@ export function updateEntryScene(scene, delta, elapsed) {
       particleMaterial.uniforms.uSize.value = particleSize;
     }
     if (particleMaterial?.uniforms?.uShowNoise) {
-      particleMaterial.uniforms.uShowNoise.value = particleShowNoise;
+      particleMaterial.uniforms.uShowNoise.value = particleShowNoiseClamped;
     }
     if (particleMaterial?.uniforms?.uInitialGlow) {
-      particleMaterial.uniforms.uInitialGlow.value = particleInitialGlow;
+      particleMaterial.uniforms.uInitialGlow.value = particleInitialGlowClamped;
     }
 
     scene.particles.setSimulationState?.({
@@ -641,8 +660,8 @@ export function updateEntryScene(scene, delta, elapsed) {
       elapsed,
       alpha: particleAlpha,
       size: particleSize,
-      initialGlow: particleInitialGlow,
-      showNoise: particleShowNoise,
+      initialGlow: particleInitialGlowClamped,
+      showNoise: particleShowNoiseClamped,
       portalCoreProgress
     });
 

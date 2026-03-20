@@ -52,7 +52,8 @@ export class MainController {
     // scrollState 存储首页滚动的 current / target / velocity。
     this.scrollState = new ScrollState({
       min: 0,
-      max: this.homeSceneStack.getTotalLength() - 0.001
+      max: this.homeSceneStack.getTotalLength(),
+      wrap: true
     });
     // detailTransition 管理首页 -> 详情页的分段进度。
     this.detailTransition = new DetailTransitionState();
@@ -106,7 +107,8 @@ export class MainController {
       onProject: (hash) => this.openProject(hash),
       onEntryLinkPreview: (index) => this.previewEntryLink(index),
       onEntryLinkPreviewClear: () => this.clearEntryLinkPreview(),
-      onEntryLinkOpen: (index) => this.activateEntryLink(index),
+      onEntryLinkSelect: (index) => this.activateEntryLink(index),
+      onEntryLinkVisit: (index) => this.visitEntryLink(index),
       onEntryLinkCycle: (direction) => this.cycleEntryLink(direction)
     });
 
@@ -263,7 +265,17 @@ export class MainController {
       return;
     }
 
-    this.sections.entry?.previewLink?.(index, { burstNoise: 1 });
+    this.sections.entry?.setAutoLinkIndex?.(index, { burstNoise: 1 });
+    this.audio?.play('ui-long');
+    this.syncUi();
+  }
+
+  visitEntryLink(index) {
+    if (!this.isEntryInteractive()) {
+      return;
+    }
+
+    this.sections.entry?.setAutoLinkIndex?.(index, { burstNoise: 0.75 });
     this.audio?.play('ui-long');
     this.syncUi();
   }
@@ -278,10 +290,10 @@ export class MainController {
       return;
     }
 
-    const currentIndex = this.sections.entry?.activeLinkIndex ?? 0;
+    const currentIndex = this.sections.entry?.autoLinkIndex ?? this.sections.entry?.activeLinkIndex ?? 0;
     const step = direction < 0 ? -1 : 1;
     const nextIndex = (currentIndex + step + links.length) % links.length;
-    const changed = this.sections.entry?.previewLink?.(nextIndex, { burstNoise: 1 }) ?? false;
+    const changed = this.sections.entry?.setAutoLinkIndex?.(nextIndex, { burstNoise: 1 }) ?? false;
 
     if (!changed) {
       return;
@@ -353,11 +365,8 @@ export class MainController {
 
     // HomeSceneStack 的 progress 是“带缓冲”的局部进度，
     // 这里把局部 progress 重新映射回整条首页 scroll 轴上的绝对位置。
-    return clamp(
-      metric.start + progress * (metric.height + 1) - 1,
-      this.scrollState.min,
-      this.scrollState.max
-    );
+    const rawTarget = metric.start + progress * (metric.height + 1) - 1;
+    return this.scrollState.resolveTarget(rawTarget, this.scrollState.current);
   }
 
   getAutoCenterTarget() {
@@ -433,10 +442,9 @@ export class MainController {
       const cubesOffset = this.sections.cubes?.getAutoCenterOffset?.() ?? null;
 
       if (cubesOffset != null) {
-        const target = clamp(
+        const target = this.scrollState.resolveTarget(
           this.scrollState.current + cubesOffset,
-          this.scrollState.min,
-          this.scrollState.max
+          this.scrollState.current
         );
 
         if (

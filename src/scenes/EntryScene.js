@@ -3,6 +3,22 @@ import { SceneBase } from './SceneBase.js';
 import { buildEntryScene } from './entry/buildScene.js';
 import { computePresentationState, updateEntryScene } from './entry/choreography.js';
 
+const DEFAULT_ENTRY_DEBUG_SETTINGS = Object.freeze({
+  particleSizeMultiplier: 1,
+  particleAlphaMultiplier: 1,
+  particleRotationSpeed: 1,
+  particleNoiseMultiplier: 1,
+  particleInitialGlowMultiplier: 1,
+  particleSimulationSpeed: 1,
+  particleFlowForceMultiplier: 1,
+  particleOrigForceMultiplier: 1,
+  particleSurfaceForceMultiplier: 1,
+  particleFriction: 0.9,
+  particleInteractionForceMultiplier: 1,
+  cylinderShellAlphaMultiplier: 1,
+  floorPhaseSpeed: 1
+});
+
 /**
  * EntryScene 是首页最后一段的 portal / outbound links 场景。
  *
@@ -55,10 +71,14 @@ export class EntryScene extends SceneBase {
       ringProximity: 0,
       squareAttr: new THREE.Vector3(0, 0, 1)
     };
+    this.floorAdditionalTime = 0;
+    this.floorAdditionalTimeTarget = 0;
     this.lastProgress = 0;
     this.direction = 1;
+    this.entryDebugSettings = { ...DEFAULT_ENTRY_DEBUG_SETTINGS };
 
     buildEntryScene(this, { assets, links });
+    this.applyParticleDebugSettings();
   }
 
   computePresentationState(progress = this.progress, enterProgress = 1) {
@@ -99,6 +119,43 @@ export class EntryScene extends SceneBase {
 
   getAutoCenterProgress() {
     return this.progress;
+  }
+
+  getEntryDebugSettings() {
+    return { ...this.entryDebugSettings };
+  }
+
+  applyParticleDebugSettings() {
+    if (!this.particles?.setDebugSetting) {
+      return;
+    }
+
+    const particleSettingsMap = {
+      particleSimulationSpeed: 'simulationSpeed',
+      particleFlowForceMultiplier: 'flowForceMultiplier',
+      particleOrigForceMultiplier: 'origForceMultiplier',
+      particleSurfaceForceMultiplier: 'surfaceForceMultiplier',
+      particleFriction: 'friction',
+      particleInteractionForceMultiplier: 'interactionForceMultiplier'
+    };
+
+    Object.entries(particleSettingsMap).forEach(([sceneKey, particleKey]) => {
+      this.particles.setDebugSetting(particleKey, this.entryDebugSettings[sceneKey]);
+    });
+  }
+
+  setEntryDebugSetting(key, value) {
+    if (!(key in this.entryDebugSettings) || !Number.isFinite(value)) {
+      return;
+    }
+
+    this.entryDebugSettings[key] = value;
+    this.applyParticleDebugSettings();
+  }
+
+  resetEntryDebugSettings() {
+    this.entryDebugSettings = { ...DEFAULT_ENTRY_DEBUG_SETTINGS };
+    this.applyParticleDebugSettings();
   }
 
   setSize(width, height) {
@@ -214,6 +271,30 @@ export class EntryScene extends SceneBase {
     });
   }
 
+  getLinkStepDirection(fromIndex, toIndex) {
+    if (!Number.isFinite(fromIndex) || !Number.isFinite(toIndex) || this.links.length <= 1) {
+      return 0;
+    }
+
+    const length = this.links.length;
+    const forward = (toIndex - fromIndex + length) % length;
+    const backward = (fromIndex - toIndex + length) % length;
+
+    if (forward === 0) {
+      return 0;
+    }
+
+    return forward <= backward ? 1 : -1;
+  }
+
+  nudgeFloorPhase(direction) {
+    if (!direction) {
+      return;
+    }
+
+    this.floorAdditionalTimeTarget += 4 * -direction;
+  }
+
   setActiveLinkIndex(index, { burstNoise = 1 } = {}) {
     if (!Number.isFinite(index) || this.links.length <= 0) {
       return false;
@@ -224,7 +305,10 @@ export class EntryScene extends SceneBase {
       return false;
     }
 
+    const previousIndex = this.activeLinkIndex;
+    const direction = this.getLinkStepDirection(previousIndex, nextIndex);
     this.activeLinkIndex = nextIndex;
+    this.nudgeFloorPhase(direction);
     this.particles?.setVolume?.(nextIndex, { burstNoise });
     return true;
   }
