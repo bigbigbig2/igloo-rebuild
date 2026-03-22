@@ -6,13 +6,16 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "export:ktx2-png": "node scripts/export-ktx2-to-png.mjs",
+    "export:drc-glb": "node scripts/export-drc-to-glb.mjs"
   },
   "dependencies": {
     "dat.gui": "^0.7.9",
     "three": "^0.179.1"
   },
   "devDependencies": {
+    "playwright-core": "^1.58.2",
     "vite": "^4.5.14"
   }
 }

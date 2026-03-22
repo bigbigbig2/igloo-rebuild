@@ -1,0 +1,395 @@
+{
+  "generatedAt": "2026-03-22T13:09:49.514Z",
+  "browserExecutablePath": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+  "outputRoot": "D:\\shu\\igloo-rebuild\\recovered-assets\\drc-glb",
+  "totals": {
+    "total": 22,
+    "exported": 22,
+    "skipped": 0,
+    "failed": 0
+  },
+  "exported": [
+    {
+      "key": "igloo-shell",
+      "section": "igloo",
+      "source": "/reference-assets/geometries/igloo.drc",
+      "output": "recovered-assets\\drc-glb\\geometries\\igloo.glb",
+      "objectType": "Mesh",
+      "vertexCount": 40796,
+      "indexed": true,
+      "indexCount": 181521,
+      "attributes": [
+        "position",
+        "normal",
+        "uv",
+        "centr",
+        "rand",
+        "emission",
+        "batchId"
+      ],
+      "customAttributes": [
+        "centr",
+        "rand",
+        "emission",
+        "batchId"
+      ],
+      "byteLength": 3339524
+    },
+    {
+      "key": "igloo-outline",
+      "section": "igloo",
+      "source": "/reference-assets/geometries/igloo/igloo_outline.drc",
+      "output": "recovered-assets\\drc-glb\\geometries\\igloo\\igloo_outline.glb",
+      "objectType": "Points",
+      "vertexCount": 3300,
+      "indexed": false,
+      "indexCount": 0,
+      "attributes": [
+        "position",
+        "color"
+      ],
+      "customAttributes": [],
+      "byteLength": 80280
+    },
+    {
+      "key": "igloo-cage",
+      "section": "igloo",
+      "source": "/reference-assets/geometries/igloo/igloo_cage.drc",
+      "output": "recovered-assets\\drc-glb\\geometries\\igloo\\igloo_cage.glb",
+      "objectType": "Mesh",
+      "vertexCount": 1404,
+      "indexed": true,
+      "indexCount": 2106,
+      "attributes": [
+        "position",
+        "color"
+      ],
+      "customAttributes": [],
+      "byteLength": 43444
+    },
+    {
+      "key": "mountain",
+      "section": "igloo",
+      "source": "/reference-assets/geometries/mountain.drc",
+      "output": "recovered-assets\\drc-glb\\geometries\\mountain.glb",
+      "objectType": "Mesh",
+      "vertexCount": 1703,
+      "indexed": true,
+      "indexCount": 8652,
+      "attributes": [
+        "position",
+        "normal",
+        "uv"
+      ],
+      "customAttributes": [],
+      "byteLength": 90672
+    },
+    {
+      "key": "igloo-patch",
+      "section": "igloo",
+      "source": "/reference-assets/geometries/igloo/patch.drc",
+      "output": "recovered-assets\\drc-glb\\geometries\\igloo\\patch.glb",
+      "objectType": "Mesh",
+      "vertexCount": 4,
+      "indexed": true,
+      "indexCount": 6,
+      "attributes": [
+        "position",
+        "normal",
+        "uv"
+      ],
+      "customAttributes": [],
+      "byteLength": 1576
+    },
+    {
+      "key": "ground",
+      "section": "igloo",
+      "source": "/reference-assets/geometries/ground.drc",
+      "output": "recovered-assets\\drc-glb\\geometries\\ground.glb",
+      "objectType": "Mesh",
+      "vertexCount": 2780,
+      "indexed": true,
+      "indexCount": 14877,
+      "attributes": [
+        "position",
+        "normal",
+        "uv"
+      ],
+      "customAttributes": [],
+      "byteLength": 150032
+    },
+    {
+      "key": "intro-particles",
+      "section": "igloo",
+      "source": "/reference-assets/geometries/intro_particles.drc",
+      "output": "recovered-assets\\drc-glb\\geometries\\intro_particles.glb",
+      "objectType": "Points",
+      "vertexCount": 252,
+      "indexed": false,
+      "indexCount": 0,
+      "attributes": [
+        "position",
+        "color"
+      ],
+      "customAttributes": [],
+      "byteLength": 7128
+    },
+    {
+      "key": "blurrytext",
+      "section": "cubes",
+      "source": "/reference-assets/geometries/blurrytext.drc",
+      "output": "recovered-assets\\drc-glb\\geometries\\blurrytext.glb",
+      "objectType": "Mesh",
+      "vertexCount": 116,
+      "indexed": true,
+      "indexCount": 174,
+      "attributes": [
+        "position",
+        "normal",
+        "uv"
+      ],
+      "customAttributes": [],
+      "byteLength": 5824
+    },
+    {
+      "key": "background-shapes",
+      "section": "cubes",
+      "source": "/reference-assets/geometries/cubes/background_shapes.drc",
+      "output": "recovered-assets\\drc-glb\\geometries\\cubes\\background_shapes.glb",
+      "objectType": "Mesh",
+      "vertexCount": 30,
+      "indexed": true,
+      "indexCount": 54,
+      "attributes": [
+        "position",
+        "normal",
+        "uv"
+      ],
+      "customAttributes": [],
+      "byteLength": 2624
+    },
+    {
+      "key": "cube1",
+      "section": "cubes",
+      "source": "/reference-assets/geometries/cubes/cube1.drc",
+      "output": "recovered-assets\\drc-glb\\geometries\\cubes\\cube1.glb",
+      "objectType": "Mesh",
+      "vertexCount": 5271,
+      "indexed": true,
+      "indexCount": 19482,
+      "attributes": [
+        "position",
+        "normal",
+        "uv"
+      ],
+      "customAttributes": [],
+      "byteLength": 248148
+    },
+    {
+      "key": "cube2",
+      "section": "cubes",
+      "source": "/reference-assets/geometries/cubes/cube2.drc",
+      "output": "recovered-assets\\drc-glb\\geometries\\cubes\\cube2.glb",
+      "objectType": "Mesh",
+      "vertexCount": 5939,
+      "indexed": true,
+      "indexCount": 18558,
+      "attributes": [
+        "position",
+        "normal",
+        "uv"
+      ],
+      "customAttributes": [],
+      "byteLength": 265804
+    },
+    {
+      "key": "cube3",
+      "section": "cubes",
+      "source": "/reference-assets/geometries/cubes/cube3.drc",
+      "output": "recovered-assets\\drc-glb\\geometries\\cubes\\cube3.glb",
+      "objectType": "Mesh",
+      "vertexCount": 7866,
+      "indexed": true,
+      "indexCount": 24114,
+      "attributes": [
+        "position",
+        "normal",
+        "uv"
+      ],
+      "customAttributes": [],
+      "byteLength": 349720
+    },
+    {
+      "key": "floor",
+      "section": "entry",
+      "source": "/reference-assets/geometries/floor.drc",
+      "output": "recovered-assets\\drc-glb\\geometries\\floor.glb",
+      "objectType": "Mesh",
+      "vertexCount": 11860,
+      "indexed": true,
+      "indexCount": 54906,
+      "attributes": [
+        "position",
+        "normal",
+        "uv"
+      ],
+      "customAttributes": [],
+      "byteLength": 600592
+    },
+    {
+      "key": "ring",
+      "section": "entry",
+      "source": "/reference-assets/geometries/shattered_ring.drc",
+      "output": "recovered-assets\\drc-glb\\geometries\\shattered_ring.glb",
+      "objectType": "Mesh",
+      "vertexCount": 7194,
+      "indexed": true,
+      "indexCount": 31206,
+      "attributes": [
+        "position",
+        "normal",
+        "uv"
+      ],
+      "customAttributes": [],
+      "byteLength": 356576
+    },
+    {
+      "key": "ring-secondary",
+      "section": "entry",
+      "source": "/reference-assets/geometries/shattered_ring2.drc",
+      "output": "recovered-assets\\drc-glb\\geometries\\shattered_ring2.glb",
+      "objectType": "Mesh",
+      "vertexCount": 7801,
+      "indexed": true,
+      "indexCount": 32364,
+      "attributes": [
+        "position",
+        "normal",
+        "uv"
+      ],
+      "customAttributes": [],
+      "byteLength": 380688
+    },
+    {
+      "key": "smoke-trail",
+      "section": "entry",
+      "source": "/reference-assets/geometries/smoke_trail.drc",
+      "output": "recovered-assets\\drc-glb\\geometries\\smoke_trail.glb",
+      "objectType": "Mesh",
+      "vertexCount": 641,
+      "indexed": true,
+      "indexCount": 3096,
+      "attributes": [
+        "position",
+        "normal",
+        "uv"
+      ],
+      "customAttributes": [],
+      "byteLength": 34392
+    },
+    {
+      "key": "ground-smoke",
+      "section": "entry",
+      "source": "/reference-assets/geometries/shattered_ring_smoke.drc",
+      "output": "recovered-assets\\drc-glb\\geometries\\shattered_ring_smoke.glb",
+      "objectType": "Mesh",
+      "vertexCount": 1677,
+      "indexed": true,
+      "indexCount": 9216,
+      "attributes": [
+        "position",
+        "normal",
+        "uv"
+      ],
+      "customAttributes": [],
+      "byteLength": 91976
+    },
+    {
+      "key": "ceiling-smoke",
+      "section": "entry",
+      "source": "/reference-assets/geometries/ceilingsmoke.drc",
+      "output": "recovered-assets\\drc-glb\\geometries\\ceilingsmoke.glb",
+      "objectType": "Mesh",
+      "vertexCount": 2451,
+      "indexed": true,
+      "indexCount": 13824,
+      "attributes": [
+        "position",
+        "normal",
+        "uv"
+      ],
+      "customAttributes": [],
+      "byteLength": 135140
+    },
+    {
+      "key": "blurrytext-cylinder",
+      "section": "detail",
+      "source": "/reference-assets/geometries/blurrytext_cylinder.drc",
+      "output": "recovered-assets\\drc-glb\\geometries\\blurrytext_cylinder.glb",
+      "objectType": "Mesh",
+      "vertexCount": 1450,
+      "indexed": true,
+      "indexCount": 5568,
+      "attributes": [
+        "position",
+        "normal",
+        "uv"
+      ],
+      "customAttributes": [],
+      "byteLength": 70100
+    },
+    {
+      "key": "pudgy",
+      "section": "detail",
+      "source": "/reference-assets/geometries/pudgy.drc",
+      "output": "recovered-assets\\drc-glb\\geometries\\pudgy.glb",
+      "objectType": "Mesh",
+      "vertexCount": 5118,
+      "indexed": true,
+      "indexCount": 25161,
+      "attributes": [
+        "position",
+        "normal",
+        "uv"
+      ],
+      "customAttributes": [],
+      "byteLength": 265992
+    },
+    {
+      "key": "overpass",
+      "section": "detail",
+      "source": "/reference-assets/geometries/overpass_logo.drc",
+      "output": "recovered-assets\\drc-glb\\geometries\\overpass_logo.glb",
+      "objectType": "Mesh",
+      "vertexCount": 3316,
+      "indexed": true,
+      "indexCount": 15420,
+      "attributes": [
+        "position",
+        "normal",
+        "uv"
+      ],
+      "customAttributes": [],
+      "byteLength": 169356
+    },
+    {
+      "key": "abstract",
+      "section": "detail",
+      "source": "/reference-assets/geometries/abstractlogo.drc",
+      "output": "recovered-assets\\drc-glb\\geometries\\abstractlogo.glb",
+      "objectType": "Mesh",
+      "vertexCount": 1500,
+      "indexed": true,
+      "indexCount": 6516,
+      "attributes": [
+        "position",
+        "normal",
+        "uv"
+      ],
+      "customAttributes": [],
+      "byteLength": 75620
+    }
+  ],
+  "skipped": [],
+  "failed": []
+}

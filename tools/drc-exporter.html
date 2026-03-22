@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>DRC Exporter</title>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "/node_modules/three/build/three.module.js"
+        }
+      }
+    </script>
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        background: #111;
+        color: #fff;
+        font: 12px/1.4 monospace;
+      }
+
+      body {
+        padding: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div>DRC exporter page</div>
+    <script type="module">
+      import * as THREE from 'three';
+      import { DRACOLoader } from '/node_modules/three/examples/jsm/loaders/DRACOLoader.js';
+      import { GLTFExporter } from '/node_modules/three/examples/jsm/exporters/GLTFExporter.js';
+
+      const loader = new DRACOLoader();
+      loader.setDecoderPath('/decoders/draco/');
+
+      const exporter = new GLTFExporter();
+
+      function arrayBufferToBase64(buffer) {
+        const bytes = new Uint8Array(buffer);
+        const chunkSize = 0x8000;
+        let binary = '';
+
+        for (let index = 0; index < bytes.length; index += chunkSize) {
+          const chunk = bytes.subarray(index, index + chunkSize);
+          binary += String.fromCharCode(...chunk);
+        }
+
+        return btoa(binary);
+      }
+
+      async function loadGeometry(task) {
+        const buffer = await fetch(task.source).then(async (response) => {
+          if (!response.ok) {
+            throw new Error(`Failed to fetch ${task.source}: ${response.status}`);
+          }
+
+          return await response.arrayBuffer();
+        });
+
+        return await new Promise((resolve, reject) => {
+          loader.decodeDracoFile(
+            buffer,
+            resolve,
+            task.dracoAttributes ?? null,
+            task.dracoAttributeTypes ?? null,
+            THREE.LinearSRGBColorSpace,
+            reject
+          );
+        });
+      }
+
+      function createExportObject(task, geometry) {
+        const hasVertexColors = geometry.hasAttribute('color');
+
+        if (geometry.index) {
+          const material = new THREE.MeshStandardMaterial({
+            color: 0xc8c8c8,
+            metalness: 0,
+            roughness: 1,
+            vertexColors: hasVertexColors
+          });
+
+          const mesh = new THREE.Mesh(geometry, material);
+          mesh.name = task.key;
+          return mesh;
+        }
+
+        const material = new THREE.PointsMaterial({
+          color: 0xffffff,
+          size: 0.02,
+          sizeAttenuation: true,
+          vertexColors: hasVertexColors
+        });
+
+        const points = new THREE.Points(geometry, material);
+        points.name = task.key;
+        return points;
+      }
+
+      async function exportTask(task) {
+        let geometry = null;
+        let object = null;
+
+        try {
+          geometry = await loadGeometry(task);
+
+          if (!geometry?.hasAttribute?.('position')) {
+            return {
+              status: 'skipped',
+              reason: 'missing-position'
+            };
+          }
+
+          object = createExportObject(task, geometry);
+
+          const root = new THREE.Scene();
+          root.name = `${task.key}-scene`;
+          root.userData = {
+            source: task.source,
+            section: task.section
+          };
+          root.add(object);
+
+          const glb = await exporter.parseAsync(root, {
+            binary: true,
+            onlyVisible: true,
+            trs: false
+          });
+
+          const attributeNames = Object.keys(geometry.attributes);
+          const customAttributes = attributeNames.filter((name) => {
+            return !['position', 'normal', 'uv', 'color', 'tangent', 'skinIndex', 'skinWeight'].includes(name);
+          });
+
+          return {
+            status: 'exported',
+            base64: arrayBufferToBase64(glb),
+            byteLength: glb.byteLength,
+            objectType: object.isPoints ? 'Points' : 'Mesh',
+            vertexCount: geometry.getAttribute('position').count,
+            indexed: Boolean(geometry.index),
+            indexCount: geometry.index ? geometry.index.count : 0,
+            attributes: attributeNames,
+            customAttributes
+          };
+        } catch (error) {
+          return {
+            status: 'failed',
+            error: error?.message ?? String(error)
+          };
+        } finally {
+          object?.parent?.remove(object);
+          object?.material?.dispose?.();
+          geometry?.dispose?.();
+        }
+      }
+
+      window.__exportDrcToGlb = exportTask;
+      window.__drcExporterReady = true;
+    </script>
+  </body>
+</html>

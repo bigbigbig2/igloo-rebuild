@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>KTX2 Exporter</title>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "/node_modules/three/build/three.module.js"
+        }
+      }
+    </script>
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        background: #111;
+        color: #fff;
+        font: 12px/1.4 monospace;
+      }
+
+      body {
+        padding: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div>KTX2 exporter page</div>
+    <script type="module">
+      import * as THREE from 'three';
+      import { KTX2Loader } from '/node_modules/three/examples/jsm/loaders/KTX2Loader.js';
+
+      const renderer = new THREE.WebGLRenderer({
+        antialias: false,
+        alpha: true,
+        preserveDrawingBuffer: true,
+        powerPreference: 'high-performance'
+      });
+      renderer.toneMapping = THREE.NoToneMapping;
+      renderer.setClearColor(0x000000, 0);
+      renderer.setPixelRatio(1);
+      renderer.domElement.style.position = 'fixed';
+      renderer.domElement.style.left = '-10000px';
+      renderer.domElement.style.top = '-10000px';
+      document.body.appendChild(renderer.domElement);
+
+      const scene = new THREE.Scene();
+      const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+      const material = new THREE.MeshBasicMaterial({
+        map: null,
+        transparent: true,
+        toneMapped: false
+      });
+      const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material);
+      scene.add(quad);
+
+      const pngCanvas = document.createElement('canvas');
+      const pngContext = pngCanvas.getContext('2d');
+
+      const loader = new KTX2Loader();
+      loader.setTranscoderPath('/decoders/basis/');
+      loader.detectSupport(renderer);
+
+      function getDimensions(texture) {
+        const image = texture?.image ?? {};
+        return {
+          width: image.width ?? 0,
+          height: image.height ?? 0,
+          depth: image.depth ?? 1
+        };
+      }
+
+      function is3DLikeTexture(texture) {
+        const { depth } = getDimensions(texture);
+        return Boolean(
+          texture?.isData3DTexture
+          || texture?.isDataArrayTexture
+          || texture?.isCompressedArrayTexture
+          || depth > 1
+        );
+      }
+
+      function rawPixelsToDataUrl(width, height, pixels) {
+        pngCanvas.width = width;
+        pngCanvas.height = height;
+
+        const imageData = pngContext.createImageData(width, height);
+        const rowSize = width * 4;
+
+        for (let y = 0; y < height; y += 1) {
+          const srcStart = (height - 1 - y) * rowSize;
+          const dstStart = y * rowSize;
+          imageData.data.set(pixels.subarray(srcStart, srcStart + rowSize), dstStart);
+        }
+
+        pngContext.putImageData(imageData, 0, 0);
+        return pngCanvas.toDataURL('image/png');
+      }
+
+      async function exportTexture(task) {
+        let texture = null;
+        let renderTarget = null;
+
+        try {
+          texture = await loader.loadAsync(task.source);
+
+          if (is3DLikeTexture(texture)) {
+            return {
+              status: 'skipped',
+              reason: '3d-texture'
+            };
+          }
+
+          const { width, height } = getDimensions(texture);
+
+          if (!width || !height) {
+            return {
+              status: 'skipped',
+              reason: 'unknown-size'
+            };
+          }
+
+          texture.needsUpdate = true;
+          renderer.setSize(width, height, false);
+          material.map = texture;
+
+          if (task.colorSpace === 'srgb') {
+            texture.colorSpace = THREE.SRGBColorSpace;
+            renderer.outputColorSpace = THREE.SRGBColorSpace;
+            renderer.setRenderTarget(null);
+            renderer.clear(true, true, true);
+            renderer.render(scene, camera);
+
+            return {
+              status: 'exported',
+              width,
+              height,
+              dataUrl: renderer.domElement.toDataURL('image/png')
+            };
+          }
+
+          texture.colorSpace = THREE.NoColorSpace;
+          renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
+          renderTarget = new THREE.WebGLRenderTarget(width, height, {
+            depthBuffer: false,
+            stencilBuffer: false
+          });
+          renderTarget.texture.colorSpace = THREE.NoColorSpace;
+
+          renderer.setRenderTarget(renderTarget);
+          renderer.clear(true, true, true);
+          renderer.render(scene, camera);
+
+          const pixels = new Uint8Array(width * height * 4);
+          renderer.readRenderTargetPixels(renderTarget, 0, 0, width, height, pixels);
+          renderer.setRenderTarget(null);
+
+          return {
+            status: 'exported',
+            width,
+            height,
+            dataUrl: rawPixelsToDataUrl(width, height, pixels)
+          };
+        } catch (error) {
+          return {
+            status: 'failed',
+            error: error?.message ?? String(error)
+          };
+        } finally {
+          material.map = null;
+          renderTarget?.dispose();
+          texture?.dispose?.();
+        }
+      }
+
+      window.__exportKtx2ToPng = exportTexture;
+      window.__ktxExporterReady = true;
+    </script>
+  </body>
+</html>

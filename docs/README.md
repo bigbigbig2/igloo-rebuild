@@ -1,6 +1,6 @@
 # Igloo Rebuild 文档索引
 
-这套文档对应的是当前 `igloo-rebuild` 代码本身，而不是早期阶段性的迁移计划或原版 bundle 笔记。
+这套文档对应的是当前 `igloo-rebuild` 代码本身，而不是早期阶段性的迁移计划或原始 bundle 笔记。
 
 目标有 3 个：
 
@@ -11,7 +11,7 @@
 ## 建议阅读顺序
 
 1. [01-system-overview.md](./01-system-overview.md)
-   系统总览、模块边界、核心对象关系。
+   系统总览、模块边界、关键对象关系。
 2. [02-runtime-flow.md](./02-runtime-flow.md)
    从应用启动到每帧更新的完整运行时链路。
 3. [03-content-and-assets.md](./03-content-and-assets.md)
@@ -26,6 +26,8 @@
    `src/` 全量源码索引。
 8. [08-public-assets.md](./08-public-assets.md)
    `public/` 资源目录、压缩格式与当前静态资源使用方式。
+9. [09-render-pipeline.md](./09-render-pipeline.md)
+   Three.js 渲染管线、离屏 RenderTarget、后处理与 WebGL HUD 合成详解。
 
 ## 当前工程一句话概括
 

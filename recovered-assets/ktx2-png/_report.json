@@ -1,0 +1,335 @@
+{
+  "generatedAt": "2026-03-22T13:00:52.107Z",
+  "browserExecutablePath": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+  "outputRoot": "D:\\shu\\igloo-rebuild\\recovered-assets\\ktx2-png",
+  "totals": {
+    "total": 47,
+    "exported": 42,
+    "skipped": 5,
+    "failed": 0
+  },
+  "exported": [
+    {
+      "key": "igloo-color",
+      "source": "/reference-assets/images/igloo/igloo_color.ktx2",
+      "output": "recovered-assets\\ktx2-png\\images\\igloo\\igloo_color.png",
+      "width": 2048,
+      "height": 2048
+    },
+    {
+      "key": "igloo-exploded-color",
+      "source": "/reference-assets/images/igloo/igloo_exploded_color.ktx2",
+      "output": "recovered-assets\\ktx2-png\\images\\igloo\\igloo_exploded_color.png",
+      "width": 2048,
+      "height": 2048
+    },
+    {
+      "key": "ground-color",
+      "source": "/reference-assets/images/igloo/ground_color.ktx2",
+      "output": "recovered-assets\\ktx2-png\\images\\igloo\\ground_color.png",
+      "width": 2048,
+      "height": 2048
+    },
+    {
+      "key": "ground-glow",
+      "source": "/reference-assets/images/igloo/ground_glow.ktx2",
+      "output": "recovered-assets\\ktx2-png\\images\\igloo\\ground_glow.png",
+      "width": 1024,
+      "height": 1024
+    },
+    {
+      "key": "ground-sansigloo-color",
+      "source": "/reference-assets/images/igloo/ground_sansigloo_color.ktx2",
+      "output": "recovered-assets\\ktx2-png\\images\\igloo\\ground_sansigloo_color.png",
+      "width": 2048,
+      "height": 2048
+    },
+    {
+      "key": "mountain-color",
+      "source": "/reference-assets/images/igloo/mountain_color.ktx2",
+      "output": "recovered-assets\\ktx2-png\\images\\igloo\\mountain_color.png",
+      "width": 2048,
+      "height": 2048
+    },
+    {
+      "key": "triangles-tiling",
+      "source": "/reference-assets/images/igloo/triangles_tiling.ktx2",
+      "output": "recovered-assets\\ktx2-png\\images\\igloo\\triangles_tiling.png",
+      "width": 512,
+      "height": 512
+    },
+    {
+      "key": "mosaic-noise",
+      "source": "/reference-assets/images/mosaic.ktx2",
+      "output": "recovered-assets\\ktx2-png\\images\\mosaic.png",
+      "width": 32,
+      "height": 32
+    },
+    {
+      "key": "clouds-noise",
+      "source": "/reference-assets/images/clouds_noise.ktx2",
+      "output": "recovered-assets\\ktx2-png\\images\\clouds_noise.png",
+      "width": 256,
+      "height": 256
+    },
+    {
+      "key": "wind-noise",
+      "source": "/reference-assets/images/wind_noise.ktx2",
+      "output": "recovered-assets\\ktx2-png\\images\\wind_noise.png",
+      "width": 256,
+      "height": 256
+    },
+    {
+      "key": "scroll-data",
+      "source": "/reference-assets/images/runtime/scroll-datatexture.ktx2",
+      "output": "recovered-assets\\ktx2-png\\images\\runtime\\scroll-datatexture.png",
+      "width": 1024,
+      "height": 1024
+    },
+    {
+      "key": "frost-data",
+      "source": "/reference-assets/images/runtime/frost-datatexture.ktx2",
+      "output": "recovered-assets\\ktx2-png\\images\\runtime\\frost-datatexture.png",
+      "width": 256,
+      "height": 256
+    },
+    {
+      "key": "blue-noise",
+      "source": "/reference-assets/images/noises/blue-8-128-rgb.ktx2",
+      "output": "recovered-assets\\ktx2-png\\images\\noises\\blue-8-128-rgb.png",
+      "width": 128,
+      "height": 128
+    },
+    {
+      "key": "perlin-data",
+      "source": "/reference-assets/images/detail/perlin-datatexture.ktx2",
+      "output": "recovered-assets\\ktx2-png\\images\\detail\\perlin-datatexture.png",
+      "width": 64,
+      "height": 64
+    },
+    {
+      "key": "blurrytext-atlas",
+      "source": "/reference-assets/images/cubes/blurrytext_atlas.ktx2",
+      "output": "recovered-assets\\ktx2-png\\images\\cubes\\blurrytext_atlas.png",
+      "width": 256,
+      "height": 256
+    },
+    {
+      "key": "dot-pattern",
+      "source": "/reference-assets/images/cubes/dot_pattern.ktx2",
+      "output": "recovered-assets\\ktx2-png\\images\\cubes\\dot_pattern.png",
+      "width": 64,
+      "height": 64
+    },
+    {
+      "key": "shapes-blurred",
+      "source": "/reference-assets/images/shapes_blurred.ktx2",
+      "output": "recovered-assets\\ktx2-png\\images\\shapes_blurred.png",
+      "width": 512,
+      "height": 1024
+    },
+    {
+      "key": "cube1-normal",
+      "source": "/reference-assets/images/cubes/cube1_normal.ktx2",
+      "output": "recovered-assets\\ktx2-png\\images\\cubes\\cube1_normal.png",
+      "width": 2048,
+      "height": 2048
+    },
+    {
+      "key": "cube1-roughness",
+      "source": "/reference-assets/images/cubes/cube1_roughness.ktx2",
+      "output": "recovered-assets\\ktx2-png\\images\\cubes\\cube1_roughness.png",
+      "width": 1024,
+      "height": 1024
+    },
+    {
+      "key": "cube2-normal",
+      "source": "/reference-assets/images/cubes/cube2_normal.ktx2",
+      "output": "recovered-assets\\ktx2-png\\images\\cubes\\cube2_normal.png",
+      "width": 2048,
+      "height": 2048
+    },
+    {
+      "key": "cube2-roughness",
+      "source": "/reference-assets/images/cubes/cube2_roughness.ktx2",
+      "output": "recovered-assets\\ktx2-png\\images\\cubes\\cube2_roughness.png",
+      "width": 1024,
+      "height": 1024
+    },
+    {
+      "key": "cube3-normal",
+      "source": "/reference-assets/images/cubes/cube3_normal.ktx2",
+      "output": "recovered-assets\\ktx2-png\\images\\cubes\\cube3_normal.png",
+      "width": 2048,
+      "height": 2048
+    },
+    {
+      "key": "cube3-roughness",
+      "source": "/reference-assets/images/cubes/cube3_roughness.ktx2",
+      "output": "recovered-assets\\ktx2-png\\images\\cubes\\cube3_roughness.png",
+      "width": 1024,
+      "height": 1024
+    },
+    {
+      "key": "pudgy-inner-color",
+      "source": "/reference-assets/images/cubes/pudgy_color.ktx2",
+      "output": "recovered-assets\\ktx2-png\\images\\cubes\\pudgy_color.png",
+      "width": 1024,
+      "height": 1024
+    },
+    {
+      "key": "overpass-inner-color",
+      "source": "/reference-assets/images/cubes/overpass_logo_color.ktx2",
+      "output": "recovered-assets\\ktx2-png\\images\\cubes\\overpass_logo_color.png",
+      "width": 1024,
+      "height": 1024
+    },
+    {
+      "key": "abstract-inner-color",
+      "source": "/reference-assets/images/cubes/abstractlogo_color.ktx2",
+      "output": "recovered-assets\\ktx2-png\\images\\cubes\\abstractlogo_color.png",
+      "width": 1024,
+      "height": 1024
+    },
+    {
+      "key": "ui-logo",
+      "source": "/reference-assets/ui/logo-datatexture.ktx2",
+      "output": "recovered-assets\\ktx2-png\\ui\\logo-datatexture.png",
+      "width": 128,
+      "height": 128
+    },
+    {
+      "key": "ui-sound",
+      "source": "/reference-assets/ui/sound-datatexture.ktx2",
+      "output": "recovered-assets\\ktx2-png\\ui\\sound-datatexture.png",
+      "width": 64,
+      "height": 128
+    },
+    {
+      "key": "ui-arrow",
+      "source": "/reference-assets/ui/arrow-datatexture.ktx2",
+      "output": "recovered-assets\\ktx2-png\\ui\\arrow-datatexture.png",
+      "width": 64,
+      "height": 64
+    },
+    {
+      "key": "ui-visit",
+      "source": "/reference-assets/ui/visit-datatexture.ktx2",
+      "output": "recovered-assets\\ktx2-png\\ui\\visit-datatexture.png",
+      "width": 100,
+      "height": 32
+    },
+    {
+      "key": "ui-font-mono",
+      "source": "/reference-assets/fonts/IBMPlexMono-Medium-datatexture.ktx2",
+      "output": "recovered-assets\\ktx2-png\\fonts\\IBMPlexMono-Medium-datatexture.png",
+      "width": 512,
+      "height": 1024
+    },
+    {
+      "key": "floor-color",
+      "source": "/reference-assets/images/floor_color.ktx2",
+      "output": "recovered-assets\\ktx2-png\\images\\floor_color.png",
+      "width": 2048,
+      "height": 2048
+    },
+    {
+      "key": "ring-color",
+      "source": "/reference-assets/images/shattered_ring_color.ktx2",
+      "output": "recovered-assets\\ktx2-png\\images\\shattered_ring_color.png",
+      "width": 1024,
+      "height": 1024
+    },
+    {
+      "key": "ring-ao",
+      "source": "/reference-assets/images/shattered_ring_ao.ktx2",
+      "output": "recovered-assets\\ktx2-png\\images\\shattered_ring_ao.png",
+      "width": 256,
+      "height": 256
+    },
+    {
+      "key": "ring-secondary-color",
+      "source": "/reference-assets/images/shattered_ring2_color.ktx2",
+      "output": "recovered-assets\\ktx2-png\\images\\shattered_ring2_color.png",
+      "width": 1024,
+      "height": 1024
+    },
+    {
+      "key": "ring-secondary-ao",
+      "source": "/reference-assets/images/shattered_ring2_ao.ktx2",
+      "output": "recovered-assets\\ktx2-png\\images\\shattered_ring2_ao.png",
+      "width": 256,
+      "height": 256
+    },
+    {
+      "key": "detail-perlin",
+      "source": "/reference-assets/images/detail/perlin-datatexture.ktx2",
+      "output": "recovered-assets\\ktx2-png\\images\\detail\\perlin-datatexture.png",
+      "width": 64,
+      "height": 64
+    },
+    {
+      "key": "detail-caustics",
+      "source": "/reference-assets/images/detail/caustics.ktx2",
+      "output": "recovered-assets\\ktx2-png\\images\\detail\\caustics.png",
+      "width": 64,
+      "height": 64
+    },
+    {
+      "key": "detail-bokeh",
+      "source": "/reference-assets/images/detail/bokeh.ktx2",
+      "output": "recovered-assets\\ktx2-png\\images\\detail\\bokeh.png",
+      "width": 512,
+      "height": 512
+    },
+    {
+      "key": "pudgy-color",
+      "source": "/reference-assets/images/pudgy_dark_color.ktx2",
+      "output": "recovered-assets\\ktx2-png\\images\\pudgy_dark_color.png",
+      "width": 1024,
+      "height": 1024
+    },
+    {
+      "key": "overpass-color",
+      "source": "/reference-assets/images/overpass_logo_dark_color.ktx2",
+      "output": "recovered-assets\\ktx2-png\\images\\overpass_logo_dark_color.png",
+      "width": 1024,
+      "height": 1024
+    },
+    {
+      "key": "abstract-color",
+      "source": "/reference-assets/images/abstractlogo_dark_color.ktx2",
+      "output": "recovered-assets\\ktx2-png\\images\\abstractlogo_dark_color.png",
+      "width": 1024,
+      "height": 1024
+    }
+  ],
+  "skipped": [
+    {
+      "key": "igloo-scene-lut",
+      "source": "/reference-assets/images/igloo/igloo_scene.ktx2",
+      "reason": "3d-lut"
+    },
+    {
+      "key": "cube-scene",
+      "source": "/reference-assets/images/cubes/cube_scene.ktx2",
+      "reason": "3d-lut"
+    },
+    {
+      "key": "entry-volume-peachesbody_64",
+      "source": "/reference-assets/images/volumes/peachesbody_64.ktx2",
+      "reason": "3d-volume"
+    },
+    {
+      "key": "entry-volume-x_64",
+      "source": "/reference-assets/images/volumes/x_64.ktx2",
+      "reason": "3d-volume"
+    },
+    {
+      "key": "entry-volume-medium_32",
+      "source": "/reference-assets/images/volumes/medium_32.ktx2",
+      "reason": "3d-volume"
+    }
+  ],
+  "failed": []
+}
