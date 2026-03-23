@@ -194,11 +194,12 @@ export class CubePlexus {
     scrollSpeed = 0
   } = {}) {
     const visibilityTarget = clamp01(visibility);
+    const focusMix = clamp01(focus);
     const blend = 1 - Math.exp(-delta * 8);
     this.visibleStrength = THREE.MathUtils.lerp(this.visibleStrength, visibilityTarget, blend);
     this.clickPulse = THREE.MathUtils.lerp(this.clickPulse, 0, 1 - Math.exp(-delta * 4.5));
 
-    const interaction = clamp01(this.clickPulse);
+    const interaction = clamp01(Math.max(this.clickPulse, focusMix));
     const displayMix = clamp01(Math.max(this.visibleStrength, interaction));
     const motionGate = 1 - clamp01(scrollSpeed * 0.85);
     const connectionDistance = this.treadmillDist;
@@ -311,7 +312,7 @@ export class CubePlexus {
       const pointA = this.points[connection.pointA];
       const pointB = this.points[connection.pointB];
       const alpha = clamp01(
-        THREE.MathUtils.lerp(0.42, 0.9, this.visibleStrength * 0.8 + this.clickPulse * 0.2)
+        THREE.MathUtils.lerp(0.42, 0.9, this.visibleStrength * 0.6 + interaction * 0.4)
         * (1 - clamp01(connection.distance / connectionDistance))
       );
 
@@ -339,14 +340,14 @@ export class CubePlexus {
     this.lineAlphaAttribute.needsUpdate = true;
 
     this.group.visible = this.visibleStrength > 0.01 && !this.captureHidden;
-    this.group.scale.setScalar(THREE.MathUtils.lerp(1, 1.08, this.clickPulse));
+    this.group.scale.setScalar(THREE.MathUtils.lerp(1, 1.1, interaction));
     this.pointMaterial.uniforms.uOpacity.value = clamp01(
-      this.visibleStrength * (0.42 + this.clickPulse * 0.58) * THREE.MathUtils.lerp(0.42, 1, motionGate)
+      this.visibleStrength * (0.42 + interaction * 0.58) * THREE.MathUtils.lerp(0.42, 1, motionGate)
     );
     this.lineMaterial.uniforms.uOpacity.value = clamp01(
-      this.visibleStrength * (0.46 + this.clickPulse * 0.54) * THREE.MathUtils.lerp(0.5, 1, motionGate)
+      this.visibleStrength * (0.46 + interaction * 0.54) * THREE.MathUtils.lerp(0.5, 1, motionGate)
     );
-    this.pointMaterial.uniforms.uPointSize.value = THREE.MathUtils.lerp(18, 34, this.visibleStrength * 0.75 + this.clickPulse * 0.25);
+    this.pointMaterial.uniforms.uPointSize.value = THREE.MathUtils.lerp(18, 34, this.visibleStrength * 0.65 + interaction * 0.35);
   }
 
   setVisible(visible) {

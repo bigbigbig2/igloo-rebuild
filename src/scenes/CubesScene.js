@@ -543,13 +543,13 @@ const TEXT_CYLINDER_FRAGMENT_SHADER = /* glsl */ `
 
 const DEFAULT_CUBES_LOOK_SETTINGS = Object.freeze({
   lutIntensity: 0.12,
-  bloomStrength: 0,
-  bloomRadius: 0.62,
-  bloomThreshold: 0.72,
-  bgDotStrength: 0,
-  backgroundShapeAlphaScale: 0,
-  blurryTextOpacityScale: 0,
-  smokeOpacityScale: 0.45
+  bloomStrength: 0.18,
+  bloomRadius: 0.55,
+  bloomThreshold: 0.78,
+  bgDotStrength: 0.35,
+  backgroundShapeAlphaScale: 0.48,
+  blurryTextOpacityScale: 0.26,
+  smokeOpacityScale: 0.72
 });
 
 const DEFAULT_CUBES_LABEL_DEBUG_SETTINGS = Object.freeze({
@@ -558,6 +558,49 @@ const DEFAULT_CUBES_LABEL_DEBUG_SETTINGS = Object.freeze({
 
 function clamp01(value) {
   return Math.min(Math.max(value, 0), 1);
+}
+
+function createTransmissionFallbackTexture() {
+  const width = 64;
+  const height = 64;
+  const data = new Uint8Array(width * height * 4);
+  const dark = new THREE.Color('#6a6f7d');
+  const light = new THREE.Color('#e1e6f1');
+  const accent = new THREE.Color('#cbd6e5');
+  const color = new THREE.Color();
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const u = x / Math.max(width - 1, 1);
+      const v = y / Math.max(height - 1, 1);
+      const diagonal = clamp01((u + v) * 0.5);
+      const centerGlow = Math.max(0, 1 - Math.hypot(u - 0.5, v - 0.42) * 1.85);
+      const band = Math.sin((u * 3.4 + v * 2.1) * Math.PI) * 0.04;
+
+      color.copy(dark).lerp(light, diagonal);
+      color.lerp(accent, centerGlow * 0.18);
+      color.multiplyScalar(1 + band);
+
+      const offset = (y * width + x) * 4;
+      data[offset + 0] = Math.round(clamp01(color.r) * 255);
+      data[offset + 1] = Math.round(clamp01(color.g) * 255);
+      data[offset + 2] = Math.round(clamp01(color.b) * 255);
+      data[offset + 3] = 255;
+    }
+  }
+
+  const texture = new THREE.DataTexture(data, width, height, THREE.RGBAFormat);
+  texture.name = 'cubes-transmission-fallback';
+  texture.magFilter = THREE.LinearFilter;
+  texture.minFilter = THREE.LinearFilter;
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.generateMipmaps = false;
+  texture.needsUpdate = true;
+  if ('colorSpace' in texture) {
+    texture.colorSpace = THREE.SRGBColorSpace;
+  }
+  return texture;
 }
 
 function smoothWindow(value, start, end) {
@@ -783,7 +826,7 @@ export class CubesScene extends SceneBase {
     this.hoveredProjectHash = null;
     this.hoveredProjectIndex = -1;
     this.pointerProjectIndex = -1;
-    this.backgroundShapesEnabled = false;
+    this.backgroundShapesEnabled = true;
     this.backgroundShapesVisible = false;
     this.blurryTextVisible = false;
     this.backgroundShapes = null;
@@ -828,7 +871,8 @@ export class CubesScene extends SceneBase {
     );
     this.windNoise = assets.get('texture', 'wind-noise') ?? this.blueNoise;
     this.trianglesTexture = assets.get('texture', 'triangles-tiling') ?? null;
-    this.baseCameraPosition = new THREE.Vector3(0, 0, 5);
+    this.transmissionFallbackTexture = createTransmissionFallbackTexture();
+    this.baseCameraPosition = new THREE.Vector3(0, 0, 4.45);
     this.baseCameraFov = this.camera.fov;
     this.transmissionTarget = createTransmissionTarget();
     this.transmissionState = {
@@ -877,8 +921,8 @@ export class CubesScene extends SceneBase {
           uProgress: { value: 0 },
           uAspect: { value: 1 },
           uResolution: { value: new THREE.Vector2(1, 1) },
-          uColor1: { value: new THREE.Color('#d8e0ec') },
-          uColor2: { value: new THREE.Color('#6c7688') },
+          uColor1: { value: new THREE.Color('#6a6f7d') },
+          uColor2: { value: new THREE.Color('#e1e6f1') },
           tPerlin: { value: this.perlinData ?? null },
           tDotPattern: { value: this.dotPattern ?? null },
           tBlue: { value: this.blueNoise },
@@ -1045,11 +1089,11 @@ export class CubesScene extends SceneBase {
       const innerAssetConfig = getInnerObjectAssetConfig(project);
       const centeredProgress = (index + 1) / (projects.length + 1);
       const geometry = prepareGeometry(assets.get('geometry', assetConfig.geometryKey), {
-        size: 1.6
+        size: 1.74
       }) || new THREE.BoxGeometry(1.35, 1.35, 1.35);
       geometry.computeBoundingSphere?.();
       const innerGeometry = prepareGeometry(assets.get('geometry', innerAssetConfig.geometryKey), {
-        size: 0.72 * innerAssetConfig.scale
+        size: 0.82 * innerAssetConfig.scale
       }) || new THREE.IcosahedronGeometry(0.35, 2);
       const cubeGroup = new THREE.Group();
       const mouseFrost = new MouseFrostMap({
@@ -1068,6 +1112,10 @@ export class CubesScene extends SceneBase {
       material.emissive.set('#ffffff');
       material.emissiveIntensity = 0;
       material.opacity = 1;
+      material.side = THREE.FrontSide;
+      if (material.envMapRotation) {
+        material.envMapRotation.y = Math.PI;
+      }
 
       const cubeMesh = new THREE.Mesh(geometry, material);
       cubeMesh.geometry.computeBoundingBox?.();
@@ -1083,7 +1131,7 @@ export class CubesScene extends SceneBase {
           map: assets.get('texture', innerAssetConfig.textureKey) ?? null,
           color: '#ffffff',
           transparent: true,
-          opacity: 0.9
+          opacity: 1
         })
       );
       innerMesh.name = `${project.innerObjectKey ?? project.hash}-inner-${index}`;
@@ -1286,8 +1334,21 @@ export class CubesScene extends SceneBase {
     }
 
     this.transmissionState.capturing = capturing;
+    const fallbackWidth = this.transmissionFallbackTexture?.image?.width ?? 1;
+    const fallbackHeight = this.transmissionFallbackTexture?.image?.height ?? 1;
+
     this.cubes.forEach((cube) => {
-      cube.visible = !capturing;
+      cube.visible = true;
+      cube.material.side = capturing ? THREE.BackSide : THREE.FrontSide;
+      cube.material.needsUpdate = true;
+
+      if (capturing) {
+        cube.material.setTransmissionTexture(
+          this.transmissionFallbackTexture,
+          fallbackWidth,
+          fallbackHeight
+        );
+      }
     });
     this.innerObjects.forEach((innerObject) => {
       innerObject.visible = capturing;
@@ -1676,13 +1737,15 @@ export class CubesScene extends SceneBase {
     const scrollOffset = this.progress * stackSpan;
     const cameraTrackY = -scrollOffset;
     const focusProgress = this.detailFocusProgress;
+    const focusCurve = THREE.MathUtils.smootherstep(focusProgress, 0, 1);
+    const focusZoomCurve = Math.pow(focusProgress, 1.65);
     const focusOffset = this.detailFocusIndex >= 0
       ? (
         (this.cubeBaseStates[this.detailFocusIndex]?.centeredProgress ?? this.progress) - this.progress
       ) * stackSpan * focusProgress
       : 0;
     const motionBlurAmount = THREE.MathUtils.clamp(this.scrollVelocity * 0.1, 0, 1);
-    const pointerInfluence = this.pointerStrength * (1 - focusProgress);
+    const pointerInfluence = this.pointerStrength * (1 - focusCurve);
     const centeredIndex = this.getCenteredProjectIndex();
 
     this.projectGroup.position.x = this.pointerCurrent.x * 0.08 * pointerInfluence;
@@ -1703,7 +1766,7 @@ export class CubesScene extends SceneBase {
       this.roomBackground.material.uniforms.uDotStrength.value = this.lookDebugSettings.bgDotStrength;
     }
 
-    const backgroundPresence = THREE.MathUtils.lerp(1, 0.22, focusProgress);
+    const backgroundPresence = THREE.MathUtils.lerp(1, 0.22, focusCurve);
     this.backgroundShapesVisible = this.lookDebugSettings.backgroundShapeAlphaScale > 0.0001 && backgroundPresence > 0.01;
     this.blurryTextVisible = this.lookDebugSettings.blurryTextOpacityScale > 0.0001 && backgroundPresence > 0.01;
 
@@ -1757,7 +1820,7 @@ export class CubesScene extends SceneBase {
       const frostEnergy = Math.abs(runtimeScrollDistance) < 2 && focusProgress < 0.02
         ? (this.frostMaps[index]?.soundVelocity ?? 0)
         : 0;
-      const idleRotationAmplitude = 0.1 * (1 - focusProgress);
+      const idleRotationAmplitude = 0.1 * (1 - focusCurve);
       const idleRotationDirection = Math.sign(runtimeRand - 0.5) || 1;
       const rotationX = (-14 * rotationSign * (1 - rotationScaleY)) * scrollProgressDifference
         + Math.sin(this.time * 0.3 + runtimeRand * 42.987) * idleRotationAmplitude * idleRotationDirection;
@@ -1766,23 +1829,23 @@ export class CubesScene extends SceneBase {
       const rotationZ = (6 * rotationSign * (1 - rotationScaleZ)) * scrollProgressDifference
         + Math.sin(this.time * 0.3 + runtimeRand * 2.53) * idleRotationAmplitude * idleRotationDirection;
       const focusSpread = this.detailFocusIndex >= 0 ? Math.sign(index - this.detailFocusIndex) : 0;
-      const focusFade = focusProgress > 0
-        ? THREE.MathUtils.lerp(1, isFocused ? 1 : 0.16, focusProgress)
+      const focusFade = focusCurve > 0
+        ? THREE.MathUtils.lerp(1, isFocused ? 1 : 0.16, focusCurve)
         : 1;
 
       cubeGroup.position.x = this.detailFocusIndex >= 0
-        ? THREE.MathUtils.lerp(0, focusSpread * 0.26, focusProgress)
+        ? THREE.MathUtils.lerp(0, focusSpread * 0.26, focusCurve)
         : 0;
-      cubeGroup.position.y = baseState.position.y + THREE.MathUtils.lerp(0, isFocused ? 0 : -0.2 - index * 0.08, focusProgress);
-      cubeGroup.position.z = THREE.MathUtils.lerp(0, isFocused ? 0 : -0.55, focusProgress);
-      cubeGroup.scale.setScalar(THREE.MathUtils.lerp(1, isFocused ? 1 : 0.82, focusProgress));
+      cubeGroup.position.y = baseState.position.y + THREE.MathUtils.lerp(0, isFocused ? 0 : -0.2 - index * 0.08, focusCurve);
+      cubeGroup.position.z = THREE.MathUtils.lerp(0, isFocused ? 0 : -0.55, focusCurve);
+      cubeGroup.scale.setScalar(THREE.MathUtils.lerp(1, isFocused ? 1 : 0.82, focusCurve));
 
       cube.rotation.x = rotationX;
       cube.rotation.y = rotationY;
       cube.rotation.z = rotationZ;
 
       material.opacity = focusFade;
-      material.emissiveIntensity = frostEnergy * 0.08;
+      material.emissiveIntensity = 0;
 
       innerObject.rotation.x = baseState.innerRotation.x + Math.sin(this.time * 0.8 + index) * 0.08 * (1 - focusProgress);
       innerObject.rotation.y += delta * (0.18 + index * 0.025);
@@ -1799,7 +1862,7 @@ export class CubesScene extends SceneBase {
         time: this.time,
         visibility: Math.abs(runtimeScrollDistance) < 1.25 ? focusFade : 0,
         hover: 0,
-        focus: isFocused ? focusProgress : 0,
+        focus: isFocused ? focusCurve : 0,
         scrollSpeed: motionBlurAmount
       });
     });
@@ -1811,7 +1874,7 @@ export class CubesScene extends SceneBase {
 
     this.camera.position.x = this.pointerCurrent.x * 0.1 * pointerInfluence;
     this.camera.position.y = cameraTrackY;
-    this.camera.position.z = this.baseCameraPosition.z + THREE.MathUtils.lerp(0, -3.5, focusProgress);
+    this.camera.position.z = this.baseCameraPosition.z + THREE.MathUtils.lerp(0, -3.5, focusZoomCurve);
     this.camera.fov = 45 - 5 * motionBlurAmount;
     this.camera.updateProjectionMatrix();
     this.camera.lookAt(
@@ -1862,6 +1925,7 @@ export class CubesScene extends SceneBase {
   dispose() {
     // transmission target、交互 frost map、辅助几何和材质都需要显式释放。
     this.transmissionTarget.dispose();
+    this.transmissionFallbackTexture?.dispose?.();
     this.frostMaps.forEach((frostMap) => frostMap.dispose());
     this.plexusSystems.forEach((plexus) => plexus.dispose());
     this.labelSystems.forEach((labels) => labels.dispose());
@@ -1894,7 +1958,7 @@ export class CubesScene extends SceneBase {
 
     // 与其他首页 scene 保持一致，使用 zoom 修正超宽屏效果。
     if (this.camera.isPerspectiveCamera) {
-      this.camera.zoom = Math.min(1, (width / height) * 1.25);
+      this.camera.zoom = Math.min(1.08, (width / height) * 1.32);
       this.camera.updateProjectionMatrix();
     }
   }

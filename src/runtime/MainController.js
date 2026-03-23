@@ -59,6 +59,7 @@ export class MainController {
     this.scrollState = new ScrollState({
       min: 0,
       max: this.homeSceneStack.getTotalLength(),
+      damping: 10.5,
       wrap: true
     });
     // detailTransition 管理首页 -> 详情页的分段进度。
@@ -85,7 +86,7 @@ export class MainController {
     this.pendingProjectEnterAudio = null;
     this.pendingProjectTextAudio = null;
     // scroll 停止多久后才允许自动居中。
-    this.scrollIdleDelay = 1.1;
+    this.scrollIdleDelay = 0.95;
     this.lastScrollInputTime = 0;
     this.lastAutoCenterTime = -Infinity;
     this.entryInteractionAudioEnabled = false;
@@ -268,8 +269,8 @@ export class MainController {
     this.homeScrollCoordinator.markScrollInteraction();
   }
 
-  centerScroll(value, duration = 1.6) {
-    this.homeScrollCoordinator.centerScroll(value, duration);
+  centerScroll(value, duration = 1.6, options = undefined) {
+    this.homeScrollCoordinator.centerScroll(value, duration, options);
   }
 
   resolveAutoCenterTarget(metric, progress) {

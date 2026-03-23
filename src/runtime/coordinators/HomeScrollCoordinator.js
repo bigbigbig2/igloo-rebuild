@@ -25,12 +25,19 @@ export class HomeScrollCoordinator {
     event.preventDefault();
     this.markScrollInteraction();
 
+    const deltaModeFactor =
+      event.deltaMode === 1
+        ? 16
+        : event.deltaMode === 2
+          ? window.innerHeight
+          : 1;
+    const normalizedDelta = clamp(event.deltaY * deltaModeFactor, -72, 72);
     const wheelScale =
       controller.homeSceneStack.getActiveSection()?.key === 'cubes'
-        ? 0.0018
-        : 0.0015;
+        ? 0.0011
+        : 0.0009;
 
-    controller.scrollState.nudge(event.deltaY * wheelScale);
+    controller.scrollState.nudge(normalizedDelta * wheelScale);
   }
 
   onKeyDown(event) {
@@ -64,8 +71,8 @@ export class HomeScrollCoordinator {
     this.controller.lastScrollInputTime = performance.now() * 0.001;
   }
 
-  centerScroll(value, duration = 1.6) {
-    this.controller.scrollState.animateTo(value, duration);
+  centerScroll(value, duration = 1.6, options = undefined) {
+    this.controller.scrollState.animateTo(value, duration, options);
   }
 
   resolveAutoCenterTarget(metric, progress) {
@@ -140,8 +147,8 @@ export class HomeScrollCoordinator {
       controller.homeSceneStack.getActiveSection()?.key ??
       null;
     const idleDelay =
-      activeSectionKey === 'cubes' ? 0.48 : controller.scrollIdleDelay;
-    const cooldown = activeSectionKey === 'cubes' ? 0.3 : 0.6;
+      activeSectionKey === 'cubes' ? 0.18 : controller.scrollIdleDelay;
+    const cooldown = activeSectionKey === 'cubes' ? 0.16 : 0.5;
 
     if (elapsed - controller.lastScrollInputTime < idleDelay) {
       return;
@@ -151,11 +158,14 @@ export class HomeScrollCoordinator {
       return;
     }
 
+    const velocityThreshold = activeSectionKey === 'cubes' ? 0.028 : 0.003;
+    const settleThreshold = activeSectionKey === 'cubes' ? 0.08 : 0.003;
+
     if (
-      controller.scrollState.velocity > 0.002
+      controller.scrollState.velocity > velocityThreshold
       || Math.abs(
         controller.scrollState.target - controller.scrollState.current
-      ) > 0.002
+      ) > settleThreshold
     ) {
       return;
     }
@@ -170,13 +180,17 @@ export class HomeScrollCoordinator {
         );
 
         if (
-          Math.abs(target - controller.scrollState.current) >= 0.02
-          || Math.abs(target - controller.scrollState.target) >= 0.02
+          Math.abs(target - controller.scrollState.current) >= 0.012
+          || Math.abs(target - controller.scrollState.target) >= 0.012
         ) {
           controller.lastAutoCenterTime = elapsed;
           this.centerScroll(
             target,
-            clamp(Math.abs(cubesOffset) * 6, 1.6, 2.4)
+            clamp(Math.abs(cubesOffset) * 3.2, 0.72, 1.12),
+            {
+              overshootScale: 0.24,
+              overshootMax: 0.28
+            }
           );
         }
         return;
@@ -197,6 +211,9 @@ export class HomeScrollCoordinator {
     }
 
     controller.lastAutoCenterTime = elapsed;
-    this.centerScroll(target, 1.25);
+    this.centerScroll(target, 1.05, {
+      overshootScale: 0.22,
+      overshootMax: 0.26
+    });
   }
 }
