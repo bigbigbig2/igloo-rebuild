@@ -10,11 +10,31 @@ const SPRITE_VERTEX_SHADER = /* glsl */ `
   }
 `;
 
+const FITTED_SPRITE_VERTEX_SHADER = /* glsl */ `
+  varying vec2 vUv;
+  varying vec2 vScale;
+
+  vec2 getMatrixScale(mat4 matrixValue) {
+    return vec2(
+      length(vec3(matrixValue[0].xyz)),
+      length(vec3(matrixValue[1].xyz))
+    );
+  }
+
+  void main() {
+    vUv = uv;
+    vScale = getMatrixScale(modelMatrix);
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
 const LOGO_FRAGMENT_SHADER = /* glsl */ `
   varying vec2 vUv;
+  varying vec2 vScale;
 
   uniform sampler2D tMap;
   uniform sampler2D tBlocks;
+  uniform vec2 uImageSize;
   uniform vec3 uColor;
   uniform float uOpacity;
   uniform float uShow;
@@ -30,6 +50,12 @@ const LOGO_FRAGMENT_SHADER = /* glsl */ `
     return smoothstep(-smoothing, smoothing, signedDistance);
   }
 
+  vec2 imagefitUV(vec2 uv, vec2 imageSize, vec2 containerSize, float cover) {
+    vec2 ratio = containerSize / max(imageSize, vec2(1.0));
+    float aspect = mix(min(ratio.x, ratio.y), max(ratio.x, ratio.y), cover);
+    return (uv - 0.5) * ratio * (1.0 / aspect) + 0.5;
+  }
+
   vec2 hash21(float value) {
     vec3 p3 = fract(vec3(value) * vec3(0.1031, 0.1030, 0.0973));
     p3 += dot(p3, p3.yzx + 33.33);
@@ -37,7 +63,7 @@ const LOGO_FRAGMENT_SHADER = /* glsl */ `
   }
 
   void main() {
-    vec2 uv = vUv;
+    vec2 uv = imagefitUV(vUv, uImageSize, max(vScale, vec2(1.0)), 1.0);
     float alpha = 1.0;
 
     if (uShow < 0.999) {
@@ -94,30 +120,33 @@ function clamp(value, min, max) {
 }
 
 const DEFAULT_ENTRY_HUD_DEBUG_SETTINGS = Object.freeze({
-  labelYOffset: 24,
-  labelTextLift: 6,
-  labelSpreadMultiplier: 1,
-  currentScaleMultiplier: 1.08,
-  sideScaleMultiplier: 1,
-  currentOpacityMultiplier: 1.18,
-  sideOpacityMultiplier: 2.3,
-  visitYOffset: -46,
-  visitOpacityMultiplier: 0.35,
+  labelYOffset: 0,
+  labelTextLift: 0,
+  labelSpreadMultiplier: 0.68,
+  currentScaleMultiplier: 1,
+  sideScaleMultiplier: 0.78,
+  currentOpacityMultiplier: 1,
+  sideOpacityMultiplier: 0.48,
+  visitYOffset: 0,
+  visitOpacityMultiplier: 1,
   arrowOpacityMultiplier: 1,
-  frameOpacityMultiplier: 1
+  frameOpacityMultiplier: 0
 });
 
 function createLogoMaterial(texture, blocksTexture) {
+  const imageWidth = texture?.image?.width ?? texture?.source?.data?.width ?? 1;
+  const imageHeight = texture?.image?.height ?? texture?.source?.data?.height ?? 1;
   return new THREE.ShaderMaterial({
     uniforms: {
       tMap: { value: texture },
       tBlocks: { value: blocksTexture },
+      uImageSize: { value: new THREE.Vector2(imageWidth, imageHeight) },
       uColor: { value: new THREE.Color('#ffffff') },
       uOpacity: { value: 1 },
       uShow: { value: 0 },
       uRand: { value: Math.random() }
     },
-    vertexShader: SPRITE_VERTEX_SHADER,
+    vertexShader: FITTED_SPRITE_VERTEX_SHADER,
     fragmentShader: LOGO_FRAGMENT_SHADER,
     transparent: true,
     depthWrite: false,
@@ -588,35 +617,35 @@ export class WebGLUiScene {
       align: 'left',
       color: '#ffffff'
     });
-    this.textBlocks.entryPrev = new CanvasTextBlock({
+    this.textBlocks.entryPrev = new MsdfTextBlock({
+      fontData: this.fontData,
+      atlasTexture: fontTexture,
       text: this.content.links?.[0]?.label ?? '',
       maxWidth: 260,
-      fontSize: 24,
-      lineHeight: 1,
-      align: 'right',
-      color: '#a8b2c4',
-      paddingX: 0,
-      paddingY: 0
-    });
-    this.textBlocks.entryCurrent = new CanvasTextBlock({
-      text: this.content.links?.[0]?.label ?? '',
-      maxWidth: 260,
-      fontSize: 28,
+      fontSize: 18,
       lineHeight: 1,
       align: 'left',
-      color: '#ffffff',
-      paddingX: 0,
-      paddingY: 0
+      color: '#a8b2c4'
     });
-    this.textBlocks.entryNext = new CanvasTextBlock({
+    this.textBlocks.entryCurrent = new MsdfTextBlock({
+      fontData: this.fontData,
+      atlasTexture: fontTexture,
+      text: this.content.links?.[0]?.label ?? '',
+      maxWidth: 260,
+      fontSize: 20,
+      lineHeight: 1,
+      align: 'left',
+      color: '#ffffff'
+    });
+    this.textBlocks.entryNext = new MsdfTextBlock({
+      fontData: this.fontData,
+      atlasTexture: fontTexture,
       text: this.content.links?.[1]?.label ?? '',
       maxWidth: 260,
-      fontSize: 24,
+      fontSize: 18,
       lineHeight: 1,
       align: 'left',
-      color: '#a8b2c4',
-      paddingX: 0,
-      paddingY: 0
+      color: '#a8b2c4'
     });
 
     this.legalGroup.add(this.textBlocks.copyright.mesh, this.textBlocks.rights.mesh);
@@ -1008,41 +1037,37 @@ export class WebGLUiScene {
     const mobile = width < 760 || height < 680;
     const small = width < 1180 || height < 820;
     const entryDebug = this.entryDebugSettings;
-    const entryCenterY = mobile ? 8 : small ? 14 : 18;
-    const arrowWidth = (mobile ? 22 : small ? 26 : 30) * this.uiScale;
-    const arrowHeight = arrowWidth * 0.52;
-    const arrowOffset = (mobile ? 170 : small ? 230 : 288) * this.uiScale;
-    const arrowLineLength = (mobile ? 30 : small ? 42 : 56) * this.uiScale;
-    const arrowLineInset = (mobile ? 10 : small ? 12 : 14) * this.uiScale;
-    const arrowTip = (mobile ? 7 : small ? 8 : 9) * this.uiScale;
-    const visitWidth = (mobile ? 138 : small ? 168 : 188) * this.uiScale;
+    const entryCenterY = (mobile ? 2 : small ? 8 : 14) * this.uiScale;
+    const arrowOffset = (mobile ? 160 : small ? 210 : 260) * this.uiScale;
+    const arrowLineLength = (mobile ? 28 : small ? 38 : 48) * this.uiScale;
+    const arrowLineInset = (mobile ? 6 : small ? 8 : 10) * this.uiScale;
+    const arrowTip = (mobile ? 8 : small ? 9 : 10) * this.uiScale;
+    const visitWidth = (mobile ? 150 : small ? 180 : 220) * this.uiScale;
     const visitHeight = visitWidth / 3.125;
-    const labelCenterY =
+    const bottomPositionY =
       -height * 0.5
-      + this.layoutState.bottomMargin
-      + ((mobile ? 84 : small ? 92 : 100) + entryDebug.labelYOffset) * this.uiScale;
+      + this.layoutState.topMargin
+      + (mobile ? 80 : 20) * this.uiScale;
+    const labelCenterY = bottomPositionY + entryDebug.labelYOffset * this.uiScale;
     const labelTextY = labelCenterY + entryDebug.labelTextLift * this.uiScale;
     const visitCenterY = labelCenterY + entryDebug.visitYOffset * this.uiScale;
     const labelSpread =
-      (mobile ? 104 : small ? 136 : 176)
+      (mobile ? 74 : small ? 88 : 98)
       * this.uiScale
       * entryDebug.labelSpreadMultiplier;
     const currentScale =
-      (mobile ? 0.82 : small ? 0.92 : 1)
+      (mobile ? 0.78 : small ? 0.88 : 0.96)
       * this.uiScale
       * entryDebug.currentScaleMultiplier;
     const sideScale =
       currentScale
-      * (mobile ? 0.72 : 0.78)
+      * (mobile ? 0.78 : 0.82)
       * entryDebug.sideScaleMultiplier;
-    const selectionOpacity = 0.62 + linksReveal * 0.3 + interactionPulse * 0.08;
-    const boxOpacity = 0.58 + linksReveal * 0.22 + interactionPulse * 0.06;
-    const sideOpacity = 0.16 + linksReveal * 0.18;
-    const currentOpacity = 0.78 + linksReveal * 0.22 + interactionPulse * 0.04;
-    const arrowOpacity = 0.3 + linksReveal * 0.34 + interactionPulse * 0.05;
-    const pulse = 1 + Math.sin(this.elapsed * 3.1) * 0.01 + interactionPulse * 0.02;
-    const frameWidth = Math.max(this.textBlocks.entryCurrent.size.width * currentScale + 44 * this.uiScale, 136 * this.uiScale);
-    const frameHeight = Math.max(this.textBlocks.entryCurrent.size.height * currentScale + 16 * this.uiScale, 30 * this.uiScale);
+    const boxOpacity = 0.74 + linksReveal * 0.12 + interactionPulse * 0.06;
+    const sideOpacity = 0.08 + linksReveal * 0.12;
+    const currentOpacity = 0.84 + linksReveal * 0.12 + interactionPulse * 0.04;
+    const arrowOpacity = 0.28 + linksReveal * 0.26 + interactionPulse * 0.04;
+    const pulse = 1 + Math.sin(this.elapsed * 3.1) * 0.008 + interactionPulse * 0.015;
 
     this.entryVisitMesh.visible = true;
     this.entryVisitMesh.scale.set(visitWidth * pulse, visitHeight * pulse, 1);
@@ -1056,28 +1081,21 @@ export class WebGLUiScene {
 
     this.entryLeftArrow.visible = false;
     this.entryRightArrow.visible = false;
-    this.entryLeftArrow.scale.set(-arrowWidth * pulse, arrowHeight * pulse, 1);
-    this.entryRightArrow.scale.set(arrowWidth * pulse, arrowHeight * pulse, 1);
-    this.entryLeftArrow.position.set(-arrowOffset, entryCenterY, 0);
-    this.entryRightArrow.position.set(arrowOffset, entryCenterY, 0);
-    this.entryLeftArrow.material.uniforms.uShow.value = linksReveal;
-    this.entryRightArrow.material.uniforms.uShow.value = linksReveal;
     this.entryLeftArrow.material.uniforms.uOpacity.value = 0;
     this.entryRightArrow.material.uniforms.uOpacity.value = 0;
 
-    this.textBlocks.entryPrev.setColor('#8d96a6');
+    this.textBlocks.entryPrev.setColor('#9ba3b1');
     this.textBlocks.entryCurrent.setColor('#ffffff');
-    this.textBlocks.entryNext.setColor('#8d96a6');
+    this.textBlocks.entryNext.setColor('#9ba3b1');
     this.textBlocks.entryPrev.setOpacity(clamp(sideOpacity * entryDebug.sideOpacityMultiplier, 0, 1));
     this.textBlocks.entryCurrent.setOpacity(clamp(currentOpacity * entryDebug.currentOpacityMultiplier, 0, 1));
     this.textBlocks.entryNext.setOpacity(clamp(sideOpacity * entryDebug.sideOpacityMultiplier, 0, 1));
 
-    placeTextBlock(this.textBlocks.entryPrev, -labelSpread, labelTextY, sideScale, 'right', 'center');
+    placeTextBlock(this.textBlocks.entryPrev, -labelSpread, labelTextY, sideScale, 'center', 'center');
     placeTextBlock(this.textBlocks.entryCurrent, 0, labelTextY, currentScale, 'center', 'center');
-    placeTextBlock(this.textBlocks.entryNext, labelSpread, labelTextY, sideScale, 'left', 'center');
+    placeTextBlock(this.textBlocks.entryNext, labelSpread, labelTextY, sideScale, 'center', 'center');
 
     this.entryLines.cage.visible = false;
-
     setLinePoints(this.entryLines.arrowLeft, [
       new THREE.Vector2(-arrowOffset - arrowTip, entryCenterY + arrowTip),
       new THREE.Vector2(-arrowOffset, entryCenterY),
@@ -1095,36 +1113,19 @@ export class WebGLUiScene {
     this.entryLines.arrowLeft.visible = true;
     this.entryLines.arrowRight.visible = true;
     this.entryLines.arrowLeft.material.opacity = clamp(
-      arrowOpacity * 0.88 * entryDebug.arrowOpacityMultiplier,
+      arrowOpacity * 0.9 * entryDebug.arrowOpacityMultiplier,
       0,
       1
     );
     this.entryLines.arrowRight.material.opacity = clamp(
-      arrowOpacity * 0.88 * entryDebug.arrowOpacityMultiplier,
+      arrowOpacity * 0.9 * entryDebug.arrowOpacityMultiplier,
       0,
       1
     );
-
-    setLinePoints(
-      this.entryLines.selectionLeft,
-      createBracketPoints(0, labelCenterY, frameWidth, frameHeight, 'left')
-    );
-    setLinePoints(
-      this.entryLines.selectionRight,
-      createBracketPoints(0, labelCenterY, frameWidth, frameHeight, 'right')
-    );
-    this.entryLines.selectionLeft.visible = true;
-    this.entryLines.selectionRight.visible = true;
-    this.entryLines.selectionLeft.material.opacity = clamp(
-      selectionOpacity * entryDebug.frameOpacityMultiplier,
-      0,
-      1
-    );
-    this.entryLines.selectionRight.material.opacity = clamp(
-      selectionOpacity * entryDebug.frameOpacityMultiplier,
-      0,
-      1
-    );
+    this.entryLines.selectionLeft.visible = false;
+    this.entryLines.selectionRight.visible = false;
+    this.entryLines.selectionLeft.material.opacity = 0;
+    this.entryLines.selectionRight.material.opacity = 0;
   }
 
   layout() {

@@ -496,7 +496,7 @@ export function updateEntryScene(scene, delta, elapsed) {
     const reveal = fadeWindow(progress, start, end, 0.05, 0.08);
     forcefield.visible = reveal > 0.001;
     forcefield.material.uniforms.uTime.value = elapsed;
-    forcefield.material.uniforms.uOpacity.value = reveal * (0.95 + interactionPulse * 0.1);
+    forcefield.material.uniforms.uOpacity.value = reveal * (0.42 + interactionPulse * 0.06);
   });
 
   scene.plasmaLayers.forEach((plasma, index) => {
@@ -505,7 +505,7 @@ export function updateEntryScene(scene, delta, elapsed) {
     plasma.visible = reveal > 0.001;
     plasma.rotation.y = (plasma.userData.initialRotation ?? index * Math.PI * 0.5) + upRotation * 0.5;
     plasma.material.uniforms.uTime.value = elapsed;
-    plasma.material.uniforms.uOpacity.value = reveal * (0.9 + interactionPulse * 0.12);
+    plasma.material.uniforms.uOpacity.value = reveal * (0.3 + interactionPulse * 0.08);
   });
 
   scene.smokeTrails.forEach(({ mesh, initialRotation }, index) => {
@@ -552,7 +552,8 @@ export function updateEntryScene(scene, delta, elapsed) {
   if (scene.portalForcefield) {
     scene.portalForcefield.visible = timePosition >= 4 || portalForcefieldReveal > 0.001;
     scene.portalForcefield.material.uniforms.uTime.value = elapsed;
-    scene.portalForcefield.material.uniforms.uAlpha.value = portalForcefieldReveal;
+    scene.portalForcefield.material.uniforms.uAlpha.value =
+      portalForcefieldReveal * (0.28 + interactionPulse * 0.05);
   }
 
   if (scene.textCylinder && scene.textCylinder2) {
@@ -584,7 +585,7 @@ export function updateEntryScene(scene, delta, elapsed) {
   if (scene.groundSmoke) {
     scene.groundSmoke.visible = timePosition >= 3.4 || groundSmokeReveal > 0.001;
     scene.groundSmoke.material.uniforms.uTime.value = elapsed;
-    scene.groundSmoke.material.uniforms.uOpacity.value = groundSmokeReveal * 0.24;
+    scene.groundSmoke.material.uniforms.uOpacity.value = groundSmokeReveal * 0.14;
   }
 
   if (scene.ceilingSmoke) {
@@ -596,19 +597,15 @@ export function updateEntryScene(scene, delta, elapsed) {
   if (scene.ambientParticles) {
     scene.ambientParticles.visible = timePosition >= 3.4 || ambientReveal > 0.001;
     scene.ambientParticles.material.uniforms.uTime.value = elapsed;
-    scene.ambientParticles.material.uniforms.uAlpha.value = ambientReveal;
+    scene.ambientParticles.material.uniforms.uAlpha.value = ambientReveal * 0.72;
   }
 
   if (scene.particles) {
     scene.particles.visible = timePosition >= 1.5 || particleReveal > 0.001;
-    scene.particles.position.y = -9.785 + Math.sin(elapsed * 0.32) * 0.025 * particleReveal;
+    scene.particles.position.y = -9.785;
     if (scene.particles.isVolumeParticleField) {
-      scene.particles.rotation.y =
-        elapsed * 0.16 * particleRotationSpeed
-        + Math.sin(elapsed * 0.18 * particleRotationSpeed) * 0.04;
-      scene.particles.rotation.x = Math.sin(elapsed * 0.23 * particleRotationSpeed) * 0.045;
-      scene.particles.rotation.z = Math.sin(elapsed * 0.17 * particleRotationSpeed) * 0.02;
-      scene.particles.scale.setScalar(THREE.MathUtils.lerp(0.985, 1.02, particleReveal));
+      scene.particles.rotation.set(0, 0, 0);
+      scene.particles.scale.setScalar(1);
     } else {
       scene.particles.rotation.y -= delta * particleRotationSpeed * (0.08 + portalCoreProgress * 0.08);
       scene.particles.rotation.x = Math.sin(elapsed * 0.25 * particleRotationSpeed) * 0.06;

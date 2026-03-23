@@ -99,6 +99,94 @@ const FULLSCREEN_VERTEX_SHADER = /* glsl */ `
   }
 `;
 
+const GLSL_BITANGENT_NOISE = /* glsl */ `
+  uvec2 _pcg4d16(uvec4 p) {
+    uvec4 v = p * 1664525u + 1013904223u;
+    v.x += v.y * v.w;
+    v.y += v.z * v.x;
+    v.z += v.x * v.y;
+    v.w += v.y * v.z;
+    v.x += v.y * v.w;
+    v.y += v.z * v.x;
+    return v.xy;
+  }
+
+  vec4 _gradient4d(uint hash) {
+    vec4 g = vec4(uvec4(hash) & uvec4(0x80000u, 0x40000u, 0x20000u, 0x10000u));
+    return g * (1.0 / vec4(0x40000u, 0x20000u, 0x10000u, 0x8000u)) - 1.0;
+  }
+
+  vec3 BitangentNoise4D(vec4 p) {
+    const vec4 F4 = vec4(0.309016994374947451);
+    const vec4 C = vec4(
+      0.138196601125011,
+      0.276393202250021,
+      0.414589803375032,
+      -0.447213595499958
+    );
+
+    vec4 i = floor(p + dot(p, F4));
+    vec4 x0 = p - i + dot(i, C.xxxx);
+
+    vec4 i0;
+    vec3 isX = step(x0.yzw, x0.xxx);
+    vec3 isYZ = step(x0.zww, x0.yyz);
+    i0.x = isX.x + isX.y + isX.z;
+    i0.yzw = 1.0 - isX;
+    i0.y += isYZ.x + isYZ.y;
+    i0.zw += 1.0 - isYZ.xy;
+    i0.z += isYZ.z;
+    i0.w += 1.0 - isYZ.z;
+
+    vec4 i3 = clamp(i0, 0.0, 1.0);
+    vec4 i2 = clamp(i0 - 1.0, 0.0, 1.0);
+    vec4 i1 = clamp(i0 - 2.0, 0.0, 1.0);
+
+    vec4 x1 = x0 - i1 + C.xxxx;
+    vec4 x2 = x0 - i2 + C.yyyy;
+    vec4 x3 = x0 - i3 + C.zzzz;
+    vec4 x4 = x0 + C.wwww;
+
+    i = i + 32768.5;
+
+    uvec2 hash0 = _pcg4d16(uvec4(i));
+    uvec2 hash1 = _pcg4d16(uvec4(i + i1));
+    uvec2 hash2 = _pcg4d16(uvec4(i + i2));
+    uvec2 hash3 = _pcg4d16(uvec4(i + i3));
+    uvec2 hash4 = _pcg4d16(uvec4(i + 1.0));
+
+    vec4 p00 = _gradient4d(hash0.x);
+    vec4 p01 = _gradient4d(hash0.y);
+    vec4 p10 = _gradient4d(hash1.x);
+    vec4 p11 = _gradient4d(hash1.y);
+    vec4 p20 = _gradient4d(hash2.x);
+    vec4 p21 = _gradient4d(hash2.y);
+    vec4 p30 = _gradient4d(hash3.x);
+    vec4 p31 = _gradient4d(hash3.y);
+    vec4 p40 = _gradient4d(hash4.x);
+    vec4 p41 = _gradient4d(hash4.y);
+
+    vec3 m0 = clamp(0.6 - vec3(dot(x0, x0), dot(x1, x1), dot(x2, x2)), 0.0, 1.0);
+    vec2 m1 = clamp(0.6 - vec2(dot(x3, x3), dot(x4, x4)), 0.0, 1.0);
+    vec3 m02 = m0 * m0;
+    vec3 m03 = m02 * m0;
+    vec2 m12 = m1 * m1;
+    vec2 m13 = m12 * m1;
+
+    vec3 temp0 = m02 * vec3(dot(p00, x0), dot(p10, x1), dot(p20, x2));
+    vec2 temp1 = m12 * vec2(dot(p30, x3), dot(p40, x4));
+    vec4 grad0 = -6.0 * (temp0.x * x0 + temp0.y * x1 + temp0.z * x2 + temp1.x * x3 + temp1.y * x4);
+    grad0 += m03.x * p00 + m03.y * p10 + m03.z * p20 + m13.x * p30 + m13.y * p40;
+
+    temp0 = m02 * vec3(dot(p01, x0), dot(p11, x1), dot(p21, x2));
+    temp1 = m12 * vec2(dot(p31, x3), dot(p41, x4));
+    vec4 grad1 = -6.0 * (temp0.x * x0 + temp0.y * x1 + temp0.z * x2 + temp1.x * x3 + temp1.y * x4);
+    grad1 += m03.x * p01 + m03.y * p11 + m03.z * p21 + m13.x * p31 + m13.y * p41;
+
+    return cross(grad0.xyz, grad1.xyz) * 81.0;
+  }
+`;
+
 const RESET_FRAGMENT_SHADER = /* glsl */ `
   precision highp float;
   precision highp sampler2D;
@@ -167,25 +255,11 @@ const COMPUTE_FRAGMENT_SHADER = /* glsl */ `
     );
   }
 
-  vec3 pseudoCurl(vec3 position, float time, float seed) {
-    vec3 a = vec3(
-      sin(position.y * 4.7 + position.z * 2.1 + time * (0.32 + seed * 0.18)),
-      sin(position.z * 4.1 + position.x * 2.8 + time * (0.37 + seed * 0.16)),
-      sin(position.x * 3.8 + position.y * 2.4 + time * (0.28 + seed * 0.19))
-    );
-
-    vec3 b = vec3(
-      cos(position.y * 3.1 - position.z * 3.6 - time * (0.26 + seed * 0.14)),
-      cos(position.z * 3.4 - position.x * 3.1 - time * (0.31 + seed * 0.15)),
-      cos(position.x * 3.9 - position.y * 3.5 - time * (0.35 + seed * 0.12))
-    );
-
-    return normalize(cross(a, b) + vec3(0.0001));
-  }
-
   float frictionFPS(float friction, float dtRatio) {
     return pow(friction, dtRatio);
   }
+
+  ${GLSL_BITANGENT_NOISE}
 
   void main() {
     ivec2 uv = ivec2(gl_FragCoord.xy);
@@ -212,7 +286,10 @@ const COMPUTE_FRAGMENT_SHADER = /* glsl */ `
 
     float dist = (volData.a * 2.0 - 1.0) * 2.0;
 
-    vec3 flow = pseudoCurl(currentPos.xyz * 7.0 + seed * 13.7, uTime, seed);
+    vec3 flow = BitangentNoise4D(vec4(
+      currentPos.xyz * 7.0,
+      uTime * (1.0 + 0.7 * hash11(seed * 43.7))
+    ));
     float flowForce = (
       0.0002 * (0.7 + 0.3 * hash11(seed * 19.7))
       + 0.0004 * additionalNoise
@@ -368,88 +445,6 @@ function buildInitialState(textureSize, cubeSize) {
   };
 }
 
-function buildVolumeShapeTexture(volumeTexture, textureSize, cubeSize, volumeScale = 1) {
-  const image = volumeTexture?.image;
-  const data = image?.data;
-  const width = image?.width ?? 0;
-  const height = image?.height ?? 0;
-  const depth = image?.depth ?? 0;
-
-  if (!data || !width || !height || !depth) {
-    return null;
-  }
-
-  const surfaceCandidates = [];
-  const interiorCandidates = [];
-
-  const getSignedDistance = (alpha) => ((alpha / 255) * 2 - 1) * 2;
-  const getAlpha = (x, y, z) => {
-    const index = ((z * height + y) * width + x) * 4;
-    return data[index + 3];
-  };
-
-  for (let z = 0; z < depth; z += 1) {
-    for (let y = 0; y < height; y += 1) {
-      for (let x = 0; x < width; x += 1) {
-        const alpha = getAlpha(x, y, z);
-        const dist = getSignedDistance(alpha);
-        const inside = dist <= 0;
-        let isSurface = Math.abs(dist) < 0.22;
-
-        if (!isSurface && inside && x > 0 && y > 0 && z > 0 && x < width - 1 && y < height - 1 && z < depth - 1) {
-          const neighborDistances = [
-            getSignedDistance(getAlpha(x - 1, y, z)),
-            getSignedDistance(getAlpha(x + 1, y, z)),
-            getSignedDistance(getAlpha(x, y - 1, z)),
-            getSignedDistance(getAlpha(x, y + 1, z)),
-            getSignedDistance(getAlpha(x, y, z - 1)),
-            getSignedDistance(getAlpha(x, y, z + 1))
-          ];
-
-          isSurface = neighborDistances.some((neighborDist) => neighborDist > 0);
-        }
-
-        if (isSurface) {
-          surfaceCandidates.push([x, y, z]);
-        } else if (inside) {
-          interiorCandidates.push([x, y, z]);
-        }
-      }
-    }
-  }
-
-  const candidates = surfaceCandidates.length > 0 ? surfaceCandidates : interiorCandidates;
-  if (candidates.length === 0) {
-    return null;
-  }
-
-  const count = textureSize * textureSize;
-  const shapeData = new Float32Array(count * 4);
-  const surfaceBias = interiorCandidates.length > 0 && surfaceCandidates.length > 0 ? 0.86 : 1;
-
-  for (let index = 0; index < count; index += 1) {
-    const stride = index * 4;
-    const useInterior = interiorCandidates.length > 0 && Math.random() > surfaceBias;
-    const source = useInterior ? interiorCandidates : candidates;
-    const sample = source[Math.floor(Math.random() * source.length)];
-    const jitterAmount = useInterior ? 0.9 : 0.42;
-    const jitterX = (Math.random() - 0.5) * jitterAmount + 0.5;
-    const jitterY = (Math.random() - 0.5) * jitterAmount + 0.5;
-    const jitterZ = (Math.random() - 0.5) * jitterAmount + 0.5;
-
-    const u = (sample[0] + jitterX) / width;
-    const v = (sample[1] + jitterY) / height;
-    const w = (sample[2] + jitterZ) / depth;
-
-    shapeData[stride + 0] = ((u - 0.5) / Math.max(volumeScale, 0.0001)) * cubeSize;
-    shapeData[stride + 1] = ((v - 0.5) / Math.max(volumeScale, 0.0001)) * cubeSize;
-    shapeData[stride + 2] = ((w - 0.5) / Math.max(volumeScale, 0.0001)) * cubeSize;
-    shapeData[stride + 3] = Math.random();
-  }
-
-  return createDataTexture(shapeData, textureSize);
-}
-
 const DEFAULT_VOLUME_PARTICLE_DEBUG_SETTINGS = Object.freeze({
   simulationSpeed: 1,
   flowForceMultiplier: 1,
@@ -500,16 +495,6 @@ export class EntryVolumeParticles extends THREE.Group {
     const sharedLightPos = { value: new THREE.Vector3(-0.75, 1, -0.1) };
 
     this.state = buildInitialState(this.textureSize, this.cubeSize);
-    this.fallbackOrigTexture = this.state.origTexture;
-    this.origTextures = this.volumeTextures.map((texture, index) => {
-      return buildVolumeShapeTexture(
-        texture,
-        this.textureSize,
-        this.cubeSize,
-        this.volumeScales[index] ?? 1
-      ) ?? this.state.origTexture;
-    });
-    this.state.origTexture = this.origTextures[0] ?? this.state.origTexture;
     this.targets = [createStateTarget(this.textureSize), createStateTarget(this.textureSize)];
     this.currentTarget = this.targets[0];
     this.nextTarget = this.targets[1];
@@ -643,7 +628,7 @@ export class EntryVolumeParticles extends THREE.Group {
     const damping = 1 - Math.exp(-delta * 2.8);
 
     this.additionalNoise = THREE.MathUtils.lerp(this.additionalNoise, 0, damping);
-    this.rotationValue -= delta * 0.00075;
+    this.rotationValue -= delta * 0.75;
 
     this.material.uniforms.uTime.value = elapsed;
     this.material.uniforms.uAlpha.value = alpha;
@@ -674,8 +659,6 @@ export class EntryVolumeParticles extends THREE.Group {
     this.rotationValue = Math.PI * 1.5;
     this.additionalNoise = Math.max(this.additionalNoise, burstNoise);
     this.computationMaterial.uniforms.tVolume.value = this.volumeTextures[nextIndex];
-    this.computationMaterial.uniforms.tOrig.value = this.origTextures[nextIndex] ?? this.state.origTexture;
-    this.resetMaterial.uniforms.tOrig.value = this.origTextures[nextIndex] ?? this.state.origTexture;
     this.computationMaterial.uniforms.uVolumeScale.value = this.volumeScales[nextIndex] ?? 1;
     this.material.uniforms.uAdditionalNoise.value = this.additionalNoise;
     this.computationMaterial.uniforms.uAdditionalNoise.value = this.additionalNoise;
@@ -796,13 +779,6 @@ export class EntryVolumeParticles extends THREE.Group {
     this.targets.forEach((target) => target.dispose());
     this.state.positionTexture.dispose();
     this.state.velocityTexture.dispose();
-    if (this.fallbackOrigTexture && !this.origTextures.includes(this.fallbackOrigTexture)) {
-      this.fallbackOrigTexture.dispose();
-    }
-    this.origTextures.forEach((texture) => {
-      if (texture && texture !== this.fallbackOrigTexture) {
-        texture.dispose();
-      }
-    });
+    this.state.origTexture.dispose();
   }
 }

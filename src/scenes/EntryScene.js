@@ -33,6 +33,8 @@ const DEFAULT_ENTRY_DEBUG_SETTINGS = Object.freeze({
 export class EntryScene extends SceneBase {
   constructor({ assets, links = [] }) {
     super({ name: 'entry', background: '#09070e' });
+    this.camera.near = 0.025;
+    this.camera.updateProjectionMatrix();
 
     this.assets = assets;
     this.links = links;
