@@ -1,4 +1,5 @@
-import { damp, clamp } from '../utils/math.js';
+import { gsap } from 'gsap';
+import { clamp } from '../utils/math.js';
 
 function smoothWindow(value, start, end) {
   if (end <= start) {
@@ -21,33 +22,60 @@ function smoothWindow(value, start, end) {
  * 这样不同层可以共用同一条总进度，又不必在完全相同的时间点起效。
  */
 export class DetailTransitionState {
-  constructor({ damping = 6.5 } = {}) {
-    this.damping = damping;
+  constructor({ openDuration = 0.9, closeDuration = 0.72, ease = 'power2.out' } = {}) {
+    this.openDuration = openDuration;
+    this.closeDuration = closeDuration;
+    this.ease = ease;
     this.progress = 0;
     this.target = 0;
+    this.tween = null;
+  }
+
+  animateTo(target, duration) {
+    const next = clamp(target, 0, 1);
+    this.target = next;
+
+    if (Math.abs(next - this.progress) <= 1e-5 || duration <= 1e-5) {
+      return this.jumpTo(next);
+    }
+
+    this.tween?.kill();
+    this.tween = gsap.to(this, {
+      progress: next,
+      duration,
+      ease: this.ease,
+      overwrite: true,
+      onComplete: () => {
+        this.progress = next;
+        this.tween = null;
+      }
+    });
+
+    return next;
   }
 
   open() {
-    // 打开 detail：目标进度变成 1，真正的 progress 在 step() 中逐帧追上。
-    this.target = 1;
+    // detail 开合属于离散过渡，更适合交给 GSAP 做确定时长的 tween。
+    this.animateTo(1, this.openDuration);
   }
 
   close() {
-    // 关闭 detail：目标进度回到 0。
-    this.target = 0;
+    this.animateTo(0, this.closeDuration);
   }
 
   jumpTo(value) {
     // 用于强制设定某个中间状态，常见于调试或需要瞬时同步的场景。
     const next = clamp(value, 0, 1);
+    this.tween?.kill();
+    this.tween = null;
     this.progress = next;
     this.target = next;
     return next;
   }
 
   step(delta) {
-    // 统一通过 damp 推进 progress，使整套过渡保持柔和。
-    this.progress = damp(this.progress, this.target, this.damping, delta);
+    // 保留 step 接口，方便继续被 Engine/MainController 每帧读取。
+    // 实际的数值推进已经由 GSAP tween 接管。
     return this.progress;
   }
 
@@ -71,5 +99,10 @@ export class DetailTransitionState {
       sceneProgress,
       uiProgress
     };
+  }
+
+  dispose() {
+    this.tween?.kill();
+    this.tween = null;
   }
 }

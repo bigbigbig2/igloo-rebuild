@@ -28,6 +28,8 @@ This repository is the clean-room reconstruction workspace for the dumped `www.i
   - Three.js 渲染管线、离屏 RenderTarget、后处理与 HUD 合成。
 - `docs/10-runtime-mental-model.md`
   - 用整体视角理解运行时、滚动编排、scene 分工与渲染调用链。
+- `docs/11-smoke-test-checklist.md`
+  - 每次运行时重构后用于快速回归的 smoke test 清单。
 
 ## Stack
 

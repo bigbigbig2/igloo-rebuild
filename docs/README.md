@@ -30,6 +30,8 @@
    Three.js 渲染管线、离屏 RenderTarget、后处理与 WebGL HUD 合成详解。
 10. [10-runtime-mental-model.md](./10-runtime-mental-model.md)
    用总图和调用链重新梳理整个运行时，帮助建立整体心智模型。
+11. [11-smoke-test-checklist.md](./11-smoke-test-checklist.md)
+   运行时重构后的快速回归清单，用于确认关键链路没有明显回归。
 
 ## 当前工程一句话概括
 

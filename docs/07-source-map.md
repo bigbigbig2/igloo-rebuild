@@ -34,6 +34,7 @@
 `src/runtime/MainController.js`
 - 运行时总调度器。
 - 统一编排资源、scene、HUD、路由、滚动、detail 过渡和音频。
+- 当前已把一部分输入、路由、UI 同步职责下沉给 `coordinators/`。
 
 `src/runtime/ScrollState.js`
 - 存储首页滚动的 current、target、velocity 等状态。
@@ -50,9 +51,32 @@
 
 `src/runtime/DetailTransitionState.js`
 - 管理首页进入 detail、以及从 detail 返回首页时的分段过渡进度。
+- 当前由 GSAP 驱动离散开合补间。
 
 `src/runtime/AudioController.js`
 - 管理播放、静音和运行时音频混音状态。
+- 当前底层播放已切到 Howler，保留运行时混音接口不变。
+
+`src/runtime/coordinators/HomeScrollCoordinator.js`
+- 承接首页滚动输入、自动居中与键盘/滚轮交互。
+
+`src/runtime/coordinators/PointerCoordinator.js`
+- 承接 pointer 命中、hover project 与点击 project 的逻辑。
+
+`src/runtime/coordinators/RouteCoordinator.js`
+- 承接首页与 detail 路由切换、项目打开与返回首页的协同逻辑。
+
+`src/runtime/coordinators/UiSyncCoordinator.js`
+- 统一构建 `uiState`，并同步给 `UIScene` 与 `WebGLUiScene`。
+
+`src/runtime/coordinators/EntryInteractionCoordinator.js`
+- 承接 entry section 的预览、选中、访问和轮换外链逻辑。
+
+`src/runtime/coordinators/HomeSceneCoordinator.js`
+- 承接首页 scene 状态同步与 `HomeSceneRenderer` render state 注入。
+
+`src/runtime/coordinators/FrameCoordinator.js`
+- 承接每帧 runtime 编排，包括 detail handoff、音频更新和 detail 收尾。
 
 ## 4. 内容层
 

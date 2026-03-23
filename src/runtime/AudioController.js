@@ -1,3 +1,4 @@
+import { Howl, Howler } from 'howler';
 import { clamp, damp } from '../utils/math.js';
 
 const LOOP_TRACK_KEYS = ['music-bg', 'room-bg', 'shard', 'particles'];
@@ -76,29 +77,14 @@ const MIX_DEFAULTS = {
   manualRoomMix: 0.45
 };
 
-function createLoopElement(source) {
-  const element = new Audio(source);
-  element.preload = 'auto';
-  element.loop = true;
-  element.playsInline = true;
-  element.crossOrigin = 'anonymous';
-  element.volume = 0;
-  return element;
-}
-
-function createOneShotElement(source) {
-  const element = new Audio(source);
-  element.preload = 'auto';
-  element.loop = false;
-  element.playsInline = true;
-  element.crossOrigin = 'anonymous';
-  return element;
-}
-
-function removeFromSet(set, value) {
-  if (set.has(value)) {
-    set.delete(value);
-  }
+function createTrackHowl(source, { loop = false } = {}) {
+  return new Howl({
+    src: [source],
+    preload: true,
+    loop,
+    html5: false,
+    volume: loop ? 0 : 1
+  });
 }
 
 export class AudioController {
@@ -109,7 +95,8 @@ export class AudioController {
     this.tracks = new Map();
     this.unlocked = false;
     this.unlocking = null;
-    this.visibilityHidden = typeof document !== 'undefined' ? document.hidden : false;
+    this.visibilityHidden =
+      typeof document !== 'undefined' ? document.hidden : false;
     this.state = {
       routeName: 'home',
       activeSectionKey: null,
@@ -155,19 +142,22 @@ export class AudioController {
         baseVolume: definition.volume,
         targetMix: 0,
         currentMix: 0,
-        element: definition.type === 'loop' ? createLoopElement(source) : null,
-        instances: new Set(),
-        started: false,
-        playPromise: null
+        howl: createTrackHowl(source, { loop: definition.type === 'loop' }),
+        loopId: null,
+        started: false
       });
     });
   }
 
   attachDomListeners() {
     if (typeof window !== 'undefined') {
-      window.addEventListener('pointerdown', this.handleUserGesture, { passive: true });
+      window.addEventListener('pointerdown', this.handleUserGesture, {
+        passive: true
+      });
       window.addEventListener('keydown', this.handleUserGesture);
-      window.addEventListener('touchstart', this.handleUserGesture, { passive: true });
+      window.addEventListener('touchstart', this.handleUserGesture, {
+        passive: true
+      });
     }
 
     if (typeof document !== 'undefined') {
@@ -183,12 +173,16 @@ export class AudioController {
     }
 
     if (typeof document !== 'undefined') {
-      document.removeEventListener('visibilitychange', this.handleVisibilityChange);
+      document.removeEventListener(
+        'visibilitychange',
+        this.handleVisibilityChange
+      );
     }
   }
 
   resolveSource(key) {
-    const entry = this.assets?.list('audio')?.find((item) => item.key === key) ?? null;
+    const entry =
+      this.assets?.list('audio')?.find((item) => item.key === key) ?? null;
     return entry?.source ?? null;
   }
 
@@ -361,33 +355,23 @@ export class AudioController {
       return this.unlocking;
     }
 
-    this.unlocking = Promise.all(LOOP_TRACK_KEYS.map(async (key) => {
-      const track = this.tracks.get(key);
-
-      if (!track?.element) {
-        return false;
-      }
-
+    this.unlocking = (async () => {
       try {
-        track.element.volume = 0;
-        await track.element.play();
-        track.started = true;
+        if (Howler.ctx?.state === 'suspended') {
+          await Howler.ctx.resume();
+        }
+
+        this.unlocked = true;
+        this.resumeLoops();
+        this.applyVolumes();
+        this.emitChange();
         return true;
       } catch (error) {
         return false;
+      } finally {
+        this.unlocking = null;
       }
-    })).then((results) => {
-      const unlocked = results.some(Boolean);
-
-      if (unlocked) {
-        this.unlocked = true;
-        this.applyVolumes();
-        this.emitChange();
-      }
-
-      this.unlocking = null;
-      return unlocked;
-    });
+    })();
 
     return this.unlocking;
   }
@@ -396,11 +380,11 @@ export class AudioController {
     LOOP_TRACK_KEYS.forEach((key) => {
       const track = this.tracks.get(key);
 
-      if (!track?.element || track.element.paused) {
+      if (!track?.howl || track.loopId == null) {
         return;
       }
 
-      track.element.pause();
+      track.howl.pause(track.loopId);
       track.started = false;
     });
   }
@@ -409,7 +393,7 @@ export class AudioController {
     LOOP_TRACK_KEYS.forEach((key) => {
       const track = this.tracks.get(key);
 
-      if (!track?.element || track.targetMix <= 0.001) {
+      if (!track?.howl || track.targetMix <= 0.001) {
         return;
       }
 
@@ -417,32 +401,33 @@ export class AudioController {
     });
   }
 
-  async ensureLoopPlayback(track) {
-    if (!track?.element || !this.unlocked) {
+  ensureLoopPlayback(track) {
+    if (!track?.howl || !this.unlocked) {
       return false;
     }
 
-    if (!track.element.paused) {
+    if (this.settings.pauseWhenHidden && this.visibilityHidden) {
+      return false;
+    }
+
+    try {
+      if (track.loopId != null) {
+        if (track.howl.playing(track.loopId)) {
+          track.started = true;
+          return true;
+        }
+
+        track.loopId = track.howl.play(track.loopId);
+      } else {
+        track.loopId = track.howl.play();
+      }
+
       track.started = true;
+      this.applyTrackVolume(track);
       return true;
+    } catch (error) {
+      return false;
     }
-
-    if (track.playPromise) {
-      return track.playPromise;
-    }
-
-    track.playPromise = track.element.play()
-      .then(() => {
-        track.started = true;
-        track.playPromise = null;
-        return true;
-      })
-      .catch(() => {
-        track.playPromise = null;
-        return false;
-      });
-
-    return track.playPromise;
   }
 
   computeMixTargets() {
@@ -501,7 +486,12 @@ export class AudioController {
         return;
       }
 
-      track.currentMix = damp(track.currentMix, track.targetMix, this.settings.fadeSpeed, delta);
+      track.currentMix = damp(
+        track.currentMix,
+        track.targetMix,
+        this.settings.fadeSpeed,
+        delta
+      );
 
       if (key === 'music-bg') {
         this.metrics.musicCurrentMix = track.currentMix;
@@ -534,19 +524,22 @@ export class AudioController {
     return this.settings.masterVolume;
   }
 
+  applyTrackVolume(track) {
+    const volume = track.type === 'loop'
+      ? clamp(track.baseVolume * track.currentMix * this.getEffectiveMasterVolume(), 0, 1)
+      : clamp(track.baseVolume * this.getEffectiveMasterVolume(), 0, 1);
+
+    if (track.type === 'loop' && track.loopId != null) {
+      track.howl.volume(volume, track.loopId);
+      return;
+    }
+
+    track.howl.volume(volume);
+  }
+
   applyVolumes() {
-    const master = this.getEffectiveMasterVolume();
-
     this.tracks.forEach((track) => {
-      if (track.type === 'loop' && track.element) {
-        track.element.volume = clamp(track.baseVolume * track.currentMix * master, 0, 1);
-      }
-
-      if (track.type === 'one-shot') {
-        track.instances.forEach((instance) => {
-          instance.volume = clamp(track.baseVolume * master, 0, 1);
-        });
-      }
+      this.applyTrackVolume(track);
     });
   }
 
@@ -565,24 +558,12 @@ export class AudioController {
       return this.ensureLoopPlayback(track);
     }
 
-    const element = createOneShotElement(track.source);
-    element.volume = clamp(track.baseVolume * this.getEffectiveMasterVolume(), 0, 1);
-
-    const cleanup = () => {
-      element.pause();
-      element.src = '';
-      removeFromSet(track.instances, element);
-    };
-
-    element.addEventListener('ended', cleanup, { once: true });
-    element.addEventListener('error', cleanup, { once: true });
-    track.instances.add(element);
+    this.applyTrackVolume(track);
 
     try {
-      await element.play();
-      return true;
+      const soundId = track.howl.play();
+      return soundId != null;
     } catch (error) {
-      cleanup();
       return false;
     }
   }
@@ -590,12 +571,17 @@ export class AudioController {
   stopLoop(key) {
     const track = this.tracks.get(key);
 
-    if (!track?.element) {
+    if (!track?.howl) {
       return;
     }
 
-    track.element.pause();
-    track.element.currentTime = 0;
+    if (track.loopId != null) {
+      track.howl.stop(track.loopId);
+    } else {
+      track.howl.stop();
+    }
+
+    track.loopId = null;
     track.started = false;
   }
 
@@ -603,15 +589,9 @@ export class AudioController {
     LOOP_TRACK_KEYS.forEach((key) => this.stopLoop(key));
 
     this.tracks.forEach((track) => {
-      if (track.type !== 'one-shot') {
-        return;
+      if (track.type === 'one-shot') {
+        track.howl.stop();
       }
-
-      track.instances.forEach((instance) => {
-        instance.pause();
-        instance.src = '';
-      });
-      track.instances.clear();
     });
   }
 
@@ -627,7 +607,10 @@ export class AudioController {
     this.setTrackBaseVolume('music-bg', this.settings.musicBaseVolume);
     this.setTrackBaseVolume('room-bg', this.settings.roomBaseVolume);
     this.setTrackBaseVolume('manifesto', this.settings.manifestoVolume);
-    this.setTrackBaseVolume('click-project', this.settings.clickProjectVolume);
+    this.setTrackBaseVolume(
+      'click-project',
+      this.settings.clickProjectVolume
+    );
     this.applyVolumes();
     this.emitChange();
   }
@@ -637,9 +620,7 @@ export class AudioController {
     this.stopAll();
 
     this.tracks.forEach((track) => {
-      track.element?.pause();
-      track.element?.removeAttribute('src');
-      track.element?.load?.();
+      track.howl.unload();
     });
 
     this.tracks.clear();

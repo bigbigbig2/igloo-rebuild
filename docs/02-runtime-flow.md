@@ -58,6 +58,15 @@
 7. 创建 `DetailScene`
 8. 首次同步 home state、audio state、UI state
 
+当前 `MainController` 仍然是运行时入口，但已经把部分职责下沉给：
+
+- `src/runtime/coordinators/HomeScrollCoordinator.js`
+- `src/runtime/coordinators/PointerCoordinator.js`
+- `src/runtime/coordinators/RouteCoordinator.js`
+- `src/runtime/coordinators/UiSyncCoordinator.js`
+
+这样主控制器更偏“高层编排”，而不是继续承载所有输入与 UI 细节。
+
 ## 3. 首页滚动链
 
 首页滚动不直接由浏览器滚动容器驱动，而是由一套独立状态链驱动。
@@ -190,6 +199,9 @@
 
 这样不同层可以共享同一条 detail 过渡，但起效时间不同。
 
+当前它的离散开合补间已经改由 `GSAP` 驱动，
+`MainController` 每帧仍然通过 `step()` 和 `getSnapshot()` 读取最新状态。
+
 ### 6.4 `MainController.onRouteChange()`
 
 进入 project 时：
@@ -267,6 +279,9 @@ pointer 事件会同时分发给多个 scene：
 - 处理 muted / master volume
 - 跟随首页 section / detail 状态自动混音
 - 暴露 `setTrackTargetMix()` 给具体 scene
+
+当前底层播放实现已经切换到 `Howler`，
+因此 unlock、loop playback 和 one-shot 播放不再直接基于原生 `Audio` 元素手写管理。
 
 ### 9.2 目前的主要音轨
 
