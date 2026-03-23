@@ -23,7 +23,7 @@ function loadArrayBuffer(loadingManager, source) {
 
 export class AssetRegistry {
   constructor(manifest, { bus } = {}) {
-    this.manifest = manifest;
+    this.manifest = manifest; // manifest 是静态资源列表，通常由 build 脚本生成，格式为 { [group: string]: Array<{ key: string, source: string, ... }> }。
     this.bus = bus;
     this.cache = new Map();
     this.pending = new Map();
@@ -31,7 +31,7 @@ export class AssetRegistry {
     this.initialized = false;
     this.loadingManager = new THREE.LoadingManager();
     this.loadingManager.onError = (url) => {
-      this.bus?.emit('assets:transfer-error', { url });
+      this.bus?.emit("assets:transfer-error", { url });
     };
   }
 

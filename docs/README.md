@@ -28,6 +28,8 @@
    `public/` 资源目录、压缩格式与当前静态资源使用方式。
 9. [09-render-pipeline.md](./09-render-pipeline.md)
    Three.js 渲染管线、离屏 RenderTarget、后处理与 WebGL HUD 合成详解。
+10. [10-runtime-mental-model.md](./10-runtime-mental-model.md)
+   用总图和调用链重新梳理整个运行时，帮助建立整体心智模型。
 
 ## 当前工程一句话概括
 

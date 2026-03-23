@@ -24,6 +24,10 @@ This repository is the clean-room reconstruction workspace for the dumped `www.i
   - `src/` 源码索引。
 - `docs/08-public-assets.md`
   - `public/` 资源目录、压缩格式与当前静态资源使用关系。
+- `docs/09-render-pipeline.md`
+  - Three.js 渲染管线、离屏 RenderTarget、后处理与 HUD 合成。
+- `docs/10-runtime-mental-model.md`
+  - 用整体视角理解运行时、滚动编排、scene 分工与渲染调用链。
 
 ## Stack
 
